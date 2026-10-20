@@ -1,0 +1,7 @@
+.git
+.github
+web/node_modules
+web/dist
+bench-results.json
+*.log
+.env

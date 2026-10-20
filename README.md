@@ -1,0 +1,141 @@
+# PayoutRescue
+
+**Rescue stuck PayPal payouts safely. Human-approved, never double-pays. Sandbox only.**
+
+PayoutRescue is a post-send control room for [PayPal Payouts](https://developer.paypal.com/api/payouts). After a batch is sent it watches every item, explains each non-success state in plain language, proposes the safe next step, and makes paying the same person twice structurally impossible. A language model drafts messages and reads messy recipient replies; deterministic code decides; a named human approves every action that moves money.
+
+Built for the PayPal AI Hackathon 2026. **Everything runs against the PayPal sandbox. No real money moves, and the server refuses to start against any other PayPal URL.**
+
+## The problem
+
+Platforms that pay many people (creators, freelancers, affiliates) send batches through PayPal Payouts, but items often do not complete. They end up `UNCLAIMED`, `FAILED`, `ONHOLD`, `BLOCKED`, `RETURNED` and more, and each needs a different next step. Unclaimed money is returned automatically after 30 days. Operators chase this by hand, and the dangerous mistake is re-sending a "stuck" payout and then having the original succeed too.
+
+## What it does
+
+| Capability | How |
+|---|---|
+| Track every item | Webhooks + a reconciler that reads whole batches, so missed or late webhooks are recovered |
+| Explain errors | PayPal's documented error names mapped to plain language and to a rules table |
+| Propose, don't act | Rules propose cancel / replace / notify / escalate. Money-moving actions need a named approver |
+| Never pay twice | One live item per payout enforced by a database index, a fresh PayPal readback before any replacement, deterministic ids so retries replay instead of duplicating |
+| Read replies safely | Emails are found by code, hidden from the model, validated afterwards. A deterministic guard blocks instructions and amounts before any model call |
+| Show the work | A visible 30-day rail, the exact request that would be sent, safety checks that must pass, and a hash-chained audit log |
+
+## Quick start (no PayPal credentials needed)
+
+Fake mode (an in-memory PayPal stand-in) works out of the box and can also show `ONHOLD`, `BLOCKED`, the day-30 return and late claims.
+
+```bash
+docker compose up --build        # app on http://localhost:8080, token: dev-token
+```
+
+or without Docker for the app:
+
+```bash
+make db                          # Postgres 16 in Docker
+make run                         # builds the UI, then serves everything on :8080
+```
+
+Open the app, enter the token, click **Load demo data**, then open any payout. Try the reply presets (including the two attack presets) and the time controls on the **Setup** page.
+
+## Using the real PayPal sandbox
+
+1. In the PayPal developer dashboard create a sandbox **Business** account with funds and a sandbox app. Enable Payouts for the app if the dashboard offers that toggle.
+2. Set `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET`, then run `make check`. It prints a token or a precise failure.
+3. Create a **Live sandbox** batch with email addresses that have no PayPal account to get real `UNCLAIMED` items. **Simulated** batches use PayPal's documented canned test values for failure states.
+4. Register the webhook (see **Setup** in the app): `PUBLIC_BASE_URL/api/webhooks/paypal`, subscribe to the payout item and batch events, copy the Webhook ID into `PAYPAL_WEBHOOK_ID`.
+
+PayPal's simulator events cannot be verified through the verify endpoint. Use real sandbox events, or set `WEBHOOK_BYPASS=true` for simulator events only (a banner shows while it is on).
+
+## One deployment, one URL
+
+The Go binary embeds the built React app, so one process serves the UI, the API and the webhook.
+
+| Route | Purpose | Auth |
+|---|---|---|
+| `cmd/server/main.go` | Process entry point: reads `PORT`, migrates, starts the reconciler and HTTP | n/a |
+| `GET /` and any non-`/api` path | React single-page app (falls back to `index.html`) | none |
+| `GET /assets/*` | Hashed static files (long cache) | none |
+| `/api/*` | JSON API | `Authorization: Bearer ADMIN_TOKEN` |
+| `POST /api/webhooks/paypal` | PayPal webhook | PayPal signature |
+| `GET /api/events` | Server-sent events (`?token=` also accepted) | token |
+| `GET /healthz` | Liveness, always 200 | none |
+| `GET /readyz` | Readiness, pings the database | none |
+| `cmd/check`, `cmd/bench` | Connection check, benchmark | n/a |
+
+### Deploy to Render
+
+1. Push to GitHub (public, MIT license).
+2. Render: **New > Blueprint**, pick the repo. `render.yaml` creates one Docker web service and one Postgres database.
+3. Fill the secrets (`PAYPAL_*`, `LLM_API_KEY`). `ADMIN_TOKEN` is generated; read it in the dashboard.
+4. After the first deploy set `PUBLIC_BASE_URL` to the service URL and redeploy.
+5. Register the webhook (above), set `PAYPAL_WEBHOOK_ID`, redeploy, then run the smoke tests below.
+
+Use a paid instance so webhooks are not missed while the service sleeps, and keep the database alive until judging ends (check the plan's expiry).
+
+**Smoke tests:** `/healthz` and `/readyz` return 200; the UI loads and a refresh on a deep link works; **Load demo data** shows items; a real sandbox webhook appears in the **Audit log**; approving a replacement twice creates one payout.
+
+## Configuration
+
+| Variable | Default | Notes |
+|---|---|---|
+| `DATABASE_URL` | required | Postgres connection string. Add `?sslmode=disable` locally |
+| `ADMIN_TOKEN` | none | Required when `APP_ENV=production` |
+| `PORT` | `8080` | Render sets its own |
+| `APP_ENV` | `development` | `production` enforces the token |
+| `AUTO_MIGRATE` | `true` | Applies embedded SQL migrations on start |
+| `PAYPAL_BASE_URL` | sandbox URL | Anything else is refused at startup |
+| `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | empty | Without them only Fake mode runs |
+| `PAYPAL_WEBHOOK_ID` | empty | Needed to verify real webhooks |
+| `WEBHOOK_BYPASS` | `false` | Skips signature checks (sandbox simulator events only) |
+| `FAKE_ENABLED` | `true` | In-memory PayPal stand-in |
+| `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL` | `none` | `anthropic` supported; without one, templates and deterministic reading are used |
+| `RECONCILE_INTERVAL_SECONDS` | `300` | PayPal advises webhooks over polling; keep this modest |
+| `PUBLIC_BASE_URL`, `PLATFORM_NAME` | empty / `Acme Creators` | Shown in the UI and templates |
+
+## Tests and the benchmark
+
+```bash
+make test        # Go tests with -race (needs Postgres), then tsc and eslint
+make bench       # 32 scripted scenarios, naive retry script vs PayoutRescue
+```
+
+The tests include a randomised "never pay twice" run (late claims, lost responses, duplicate webhooks, corrections, approvals) that checks the invariants after every step. The benchmark labels every scenario `FAKE`, `SIMULATED` or `LIVE_SANDBOX`. **It is a scripted comparison, not a real-world measurement.** The "manual steps" baseline (7 per problem item) is an assumption, and the 20 reply-reading cases were written alongside the code, so they are not an independent test.
+
+## What is verified, and what is not
+
+Verified in this repository: unit and integration tests against Postgres, the HTTP API, the embedded UI, the benchmark, lint and typecheck.
+
+**Not yet verified against the real PayPal sandbox** (this build had no credentials): that a real unregistered email becomes `UNCLAIMED`; the exact response shape of each PayPal test value (`SimItem` handles both an item payload and a named HTTP error); end-to-end webhook signature verification; that the sandbox app has Payouts enabled; and the error name used for invalid emails (`INVALID_EMAIL` vs `INVALID_EMAIL_ID`; both are handled). Run the day-1 spike in `docs/SPIKE.md` first. Anything unconfirmed is marked `TODO(verify)` in code.
+
+## Layout
+
+```
+cmd/server, cmd/check, cmd/bench     entry points
+internal/state      statuses, legal transitions, invariants (pure)
+internal/rules      error code -> proposed action (pure)
+internal/paypal     hand-written Payouts client, retries reuse request ids, SimItem
+internal/fakepaypal in-memory stand-in with fault injection
+internal/store      Postgres, embedded migrations, hash-chained audit log
+internal/engine     readback, propose, approve, safe cancel and replace, reconcile
+internal/ai         templates, validated extraction, injection guard, provider interface
+internal/httpapi    API, webhook, SSE, SPA serving
+internal/bench      benchmark harnesses and scenarios
+web/                React + TypeScript + Vite + Tailwind + AG Grid (Community)
+```
+
+See `ARCHITECTURE.md` for the state machine, invariants and failure modes, and `AGENTS.md` for the rules to follow when extending the project.
+
+## Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| Server exits: "refusing to start" | `PAYPAL_BASE_URL` must be the sandbox URL |
+| Live or Simulated modes are disabled | `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` are not set |
+| Webhooks return 401 | `PAYPAL_WEBHOOK_ID` missing or wrong; simulator events cannot be verified |
+| Blank page after `go run` | Build the UI first (`make web`); the binary embeds `web/dist` |
+| Render DB connection fails on TLS | Append `?sslmode=require` (or `disable` for a local database) to `DATABASE_URL` |
+
+## License
+
+MIT. Sandbox only; not affiliated with PayPal.

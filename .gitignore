@@ -1,0 +1,8 @@
+.env
+*.log
+bench-results.json
+bin/
+web/node_modules/
+web/dist/*
+!web/dist/.gitkeep
+.DS_Store

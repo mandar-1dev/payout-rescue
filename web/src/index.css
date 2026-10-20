@@ -1,0 +1,77 @@
+@import '@fontsource-variable/public-sans/index.css';
+@import '@fontsource-variable/jetbrains-mono/index.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Palette: Fog (page), Ink (text), Marine (actions), Signal (time running out),
+   Brick (refused/failed), Pine (paid), Iris (held). */
+:root {
+  --bg: #edf1f3;
+  --surface: #ffffff;
+  --sunken: #e3eaed;
+  --ink: #11262b;
+  --muted: #566a70;
+  --line: #d2dce0;
+  --marine: #0e6b78;
+  --marine-ink: #ffffff;
+  --signal: #b87400;
+  --brick: #b23a2e;
+  --pine: #1b7549;
+  --iris: #5f52ad;
+  color-scheme: light;
+}
+[data-theme='dark'] {
+  --bg: #0b171a;
+  --surface: #122227;
+  --sunken: #0e1c20;
+  --ink: #e5eef0;
+  --muted: #94a9af;
+  --line: #243b42;
+  --marine: #55c1cd;
+  --marine-ink: #07262b;
+  --signal: #e7ac38;
+  --brick: #ef7d6f;
+  --pine: #5cc590;
+  --iris: #a99cf0;
+  color-scheme: dark;
+}
+
+html, body, #root { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Public Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.num { font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 2px solid var(--marine); outline-offset: 2px; border-radius: 4px; }
+::selection { background: color-mix(in srgb, var(--marine) 30%, transparent); }
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md border px-3 py-1.5 text-[13px] font-semibold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary { @apply border-marine bg-marine text-marine-ink hover:brightness-110; }
+  .btn-quiet { @apply border-line bg-surface text-ink hover:bg-sunken; }
+  .btn-danger { @apply border-brick bg-transparent text-brick hover:bg-brick/10; }
+  .field {
+    @apply w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-[13px] text-ink placeholder:text-muted/70;
+  }
+  .panel { @apply rounded-lg border border-line bg-surface; }
+  .h-section { @apply text-[13px] font-semibold tracking-wide text-muted; }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px] font-semibold leading-5;
+    color: var(--c);
+    background: color-mix(in srgb, var(--c) 13%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 30%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rise { animation: rise 220ms ease-out both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
