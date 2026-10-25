@@ -11,6 +11,9 @@ Read `ARCHITECTURE.md` first. These rules protect the project's one promise: it 
 6. The server must refuse any PayPal base URL other than the sandbox.
 7. Never log secrets. Never store real personal data; use synthetic recipients.
 8. Audit every state change and every action. `audit_log` is append-only.
+9. Resolving a conflict must never create, cancel or re-send a payout. It may record a validated email, withdraw a proposal, draft a message, create an ordinary proposal that still needs approval, or close the case.
+10. Bulk actions apply only to messages, escalations and notes. A money-moving action can never be approved in bulk.
+11. Seed and test data must be produced through the real flows (replies, readbacks, approvals), never by writing statuses directly.
 
 ## Before you finish any change
 - `make test` passes (Go with `-race`, then `tsc` and `eslint`). The randomised never-pay-twice test must stay green.

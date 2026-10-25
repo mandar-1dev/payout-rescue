@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '../lib/api'
+import { api, snoozeAction } from '../lib/api'
 import { actionLabel, money } from '../lib/format'
 import type { Action, Message, Preflight } from '../lib/types'
 import { useToast } from './ui'
@@ -35,6 +35,12 @@ export function ActionCard({ action, preflight, message, approver, heading }: {
   const reject = useMutation({
     mutationFn: () => api(`/api/actions/${action.id}/reject`, { method: 'POST', json: { approver } }),
     onSuccess: () => { toast('Rejected.'); void qc.invalidateQueries() },
+    onError: (e: Error) => toast(e.message, 'error'),
+  })
+
+  const snooze = useMutation({
+    mutationFn: (days: number) => snoozeAction(action.id, days),
+    onSuccess: (_r, days) => { toast(`Snoozed for ${days} ${days === 1 ? 'day' : 'days'}. It returns to the queue afterwards.`); void qc.invalidateQueries() },
     onError: (e: Error) => toast(e.message, 'error'),
   })
 
@@ -104,7 +110,16 @@ export function ActionCard({ action, preflight, message, approver, heading }: {
             {approve.isPending ? 'Working…' : action.kind === 'notify' ? 'Mark as sent' : action.kind === 'escalate' || action.kind === 'flag' ? 'Acknowledge' : 'Approve'}
           </button>
           <button className="btn btn-quiet" disabled={!approver.trim() || reject.isPending} onClick={() => reject.mutate()}>Reject</button>
-          {!approver.trim() && <span className="text-[12px] text-muted">Enter your name above to act.</span>}
+          <label className="ml-auto flex items-center gap-1.5 text-[12px] text-muted">
+            Snooze
+            <select className="field !w-auto !py-1" value="" aria-label="Snooze this decision" disabled={snooze.isPending} onChange={(e) => e.target.value && snooze.mutate(Number(e.target.value))}>
+              <option value="">Remind me in…</option>
+              <option value="1">1 day</option>
+              <option value="3">3 days</option>
+              <option value="7">7 days</option>
+            </select>
+          </label>
+          {!approver.trim() && <span className="basis-full text-[12px] text-muted">Enter your name in Acting as (left menu) to act.</span>}
           {isMoney && !ready && approver.trim() && <span className="text-[12px] text-brick">A safety check is failing, so approval is disabled.</span>}
         </footer>
       )}

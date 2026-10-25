@@ -1,16 +1,18 @@
 import { useQuery } from '@tanstack/react-query'
-import { api } from '../lib/api'
+import { api, download } from '../lib/api'
 import type { AuditEntry } from '../lib/types'
-import { ErrorNote, Skeleton } from '../components/ui'
+import { ErrorNote, Skeleton, useToast } from '../components/ui'
 import { when } from '../lib/format'
 
 export function Audit() {
+  const toast = useToast()
   const log = useQuery({ queryKey: ['audit'], queryFn: () => api<AuditEntry[]>('/api/audit?limit=300') })
   const ver = useQuery({ queryKey: ['audit-verify'], queryFn: () => api<{ entries: number; intact: boolean; first_broken_id: number }>('/api/audit/verify') })
   return (
     <div className="space-y-4">
       <section className="panel flex flex-wrap items-center gap-3 p-4">
         <h2 className="text-lg font-bold">Audit log</h2>
+        <button className="btn btn-quiet ml-auto" onClick={() => download('/api/audit/export.csv', 'audit_log.csv').catch((e: Error) => toast(e.message, 'error'))}>Export CSV</button>
         {ver.data && (
           <span className="chip" style={{ ['--c' as string]: ver.data.intact ? 'var(--pine)' : 'var(--brick)' }}>
             {ver.data.intact ? `Chain intact · ${ver.data.entries} entries` : `Chain broken at entry ${ver.data.first_broken_id}`}

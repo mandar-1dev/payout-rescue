@@ -27,6 +27,31 @@ export interface Item {
   age_days: number
   days_left: number
   open_actions?: number
+  open_conflicts?: number
+}
+
+export interface Conflict {
+  id: string
+  item_id: string
+  kind: 'claim_race' | 'ambiguous_reply' | 'email_same_as_on_file' | 'refusal_vs_proposal' | 'held_with_correction' | 'attempts_exhausted' | 'status_disagreement' | string
+  summary: string
+  details: Record<string, unknown>
+  status: 'open' | 'resolved'
+  resolution?: string | null
+  resolved_by?: string | null
+  note?: string | null
+  dedupe_key: string
+  created_at: string
+  resolved_at?: string | null
+  item?: Item
+}
+
+export interface Note {
+  id: string
+  item_id: string
+  author: string
+  body: string
+  created_at: string
 }
 
 export interface Action {
@@ -39,6 +64,7 @@ export interface Action {
   decided_by: string
   result: Record<string, unknown> | null
   created_at: string
+  snoozed_until?: string | null
   item?: Item
   preflight?: Preflight
 }
@@ -53,7 +79,7 @@ export interface Preflight { action_id: string; kind: string; checks: Check[]; p
 export interface Message {
   id: string; item_id: string; action_id: string; direction: 'outbound' | 'inbound'
   subject: string; body: string; status: string
-  extracted: { new_email?: string; new_currency?: string; refuses?: boolean; unclear?: boolean; injection?: boolean; source?: string; notes?: string[] } | null
+  extracted: { new_email?: string; new_currency?: string; refuses?: boolean; unclear?: boolean; injection?: boolean; source?: string; notes?: string[]; candidates?: string[] } | null
   created_at: string
 }
 
@@ -66,6 +92,8 @@ export interface ItemDetail {
   audit: AuditEntry[]
   preflight: Record<string, Preflight>
   attempts: Item[]
+  conflicts?: Conflict[]
+  notes?: Note[]
 }
 
 export interface Summary {
@@ -82,6 +110,42 @@ export interface Summary {
   audit_entries: number
   audit_intact: boolean
   webhook_bypass: boolean
+  open_conflicts?: number
+}
+
+export interface DemoPayout {
+  name: string
+  email: string
+  amount: string
+  currency: string
+  purpose: string
+  group: string
+  mode: Mode
+  fake_outcome?: string
+  story: string
+  expected: string
+  conflict_kind?: string
+  try_this: string[]
+}
+
+export interface RouteDoc {
+  pattern: string
+  doc: string
+}
+
+export interface RuleProposal { Kind: string; TemplateKey: string; Reason: string }
+export interface RuleRow { when: string; status: string; error_code: string; age_days: number; corrected_email: boolean; proposals: RuleProposal[] | null }
+export interface DemoPayouts { standard: DemoPayout[]; conflicts: DemoPayout[] }
+export interface DuplicateWarning { index: number; email: string; amount: string; currency: string; item_id: string; created_at: string }
+
+export interface Reference {
+  routes: RouteDoc[]
+  statuses: Status[]
+  action_kinds: string[]
+  template_keys: string[]
+  sim_tags: Record<string, string>
+  conflict_resolutions: Record<string, string[]>
+  rules_matrix: RuleRow[]
 }
 
 export interface Session {

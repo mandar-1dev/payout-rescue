@@ -4,6 +4,8 @@ package httpapi
 import (
 	"context"
 	"crypto/subtle"
+	"database/sql"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +22,7 @@ import (
 	"github.com/mandar-1dev/payoutrescue/internal/ai"
 	"github.com/mandar-1dev/payoutrescue/internal/bench"
 	"github.com/mandar-1dev/payoutrescue/internal/config"
+	"github.com/mandar-1dev/payoutrescue/internal/demo"
 	"github.com/mandar-1dev/payoutrescue/internal/engine"
 	"github.com/mandar-1dev/payoutrescue/internal/paypal"
 	"github.com/mandar-1dev/payoutrescue/internal/rules"
@@ -27,6 +30,11 @@ import (
 	"github.com/mandar-1dev/payoutrescue/internal/state"
 	"github.com/mandar-1dev/payoutrescue/internal/store"
 )
+
+type RouteDoc struct {
+	Pattern string `json:"pattern"`
+	Doc     string `json:"doc"`
+}
 
 type Server struct {
 	Eng     *engine.Engine
@@ -36,6 +44,20 @@ type Server struct {
 	Live    paypal.Client
 	Log     *slog.Logger
 	benchOn atomic.Bool
+	mux     *http.ServeMux
+	routes  []RouteDoc
+}
+
+func (s *Server) route(pattern, doc string, handler http.HandlerFunc) {
+	if strings.TrimSpace(doc) == "" {
+		panic(fmt.Sprintf("route %q registered without documentation", pattern))
+	}
+	s.routes = append(s.routes, RouteDoc{Pattern: pattern, Doc: doc})
+	s.mux.HandleFunc(pattern, handler)
+}
+
+func (s *Server) Routes() []RouteDoc {
+	return s.routes
 }
 
 func (s *Server) log() *slog.Logger {
@@ -106,9 +128,11 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 // ---------- routes ----------
 
 func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+	s.mux = http.NewServeMux()
+	s.routes = nil
+
+	s.route("GET /healthz", "Liveness probe returning 200 OK", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
+	s.route("GET /readyz", "Readiness probe verifying database connectivity", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		defer cancel()
 		if err := s.Eng.Store.DB.PingContext(ctx); err != nil {
@@ -117,33 +141,45 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeJSON(w, 200, map[string]string{"status": "ready"})
 	})
-	mux.HandleFunc("GET /api/public", s.public)
-	mux.HandleFunc("POST /api/webhooks/paypal", s.webhook)
+	s.route("GET /api/public", "Public configuration: authentication requirements and platform details", s.public)
+	s.route("POST /api/webhooks/paypal", "PayPal webhook receiver for asynchronous payment notifications", s.webhook)
 
-	mux.HandleFunc("GET /api/session", s.authed(s.session))
-	mux.HandleFunc("GET /api/limbo", s.authed(s.limbo))
-	mux.HandleFunc("POST /api/batches", s.authed(s.createBatch))
-	mux.HandleFunc("GET /api/batches", s.authed(s.listBatches))
-	mux.HandleFunc("GET /api/batches/{id}", s.authed(s.getBatch))
-	mux.HandleFunc("GET /api/items", s.authed(s.listItems))
-	mux.HandleFunc("GET /api/items/{id}", s.authed(s.getItem))
-	mux.HandleFunc("POST /api/items/{id}/refresh", s.authed(s.refreshItem))
-	mux.HandleFunc("POST /api/items/{id}/corrected-email", s.authed(s.correctedEmail))
-	mux.HandleFunc("GET /api/actions", s.authed(s.listActions))
-	mux.HandleFunc("POST /api/actions/{id}/approve", s.authed(s.approve))
-	mux.HandleFunc("POST /api/actions/{id}/reject", s.authed(s.reject))
-	mux.HandleFunc("POST /api/messages/inbound", s.authed(s.inbound))
-	mux.HandleFunc("POST /api/admin/reconcile", s.authed(s.reconcile))
-	mux.HandleFunc("POST /api/admin/advance", s.authed(s.advance))
-	mux.HandleFunc("POST /api/demo/seed", s.authed(s.seed))
-	mux.HandleFunc("GET /api/audit", s.authed(s.audit))
-	mux.HandleFunc("GET /api/audit/verify", s.authed(s.auditVerify))
-	mux.HandleFunc("POST /api/bench/run", s.authed(s.benchRun))
-	mux.HandleFunc("GET /api/bench/latest", s.authed(s.benchLatest))
-	mux.HandleFunc("GET /api/events", s.authed(s.Hub.ServeHTTP))
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeErr(w, http.StatusNotFound, "unknown API route") })
-	mux.HandleFunc("/", s.spa)
-	return s.middleware(mux)
+	s.route("GET /api/session", "Current operator session, feature flags, and environment details", s.authed(s.session))
+	s.route("GET /api/limbo", "Dashboard summary metrics, aging buckets, and in-limbo currency totals", s.authed(s.limbo))
+	s.route("POST /api/batches", "Create a new batch of payout items", s.authed(s.createBatch))
+	s.route("GET /api/batches", "List recent payout batches", s.authed(s.listBatches))
+	s.route("GET /api/batches/{id}", "Get batch details and item statuses", s.authed(s.getBatch))
+	s.route("GET /api/items", "List and filter payout items", s.authed(s.listItems))
+	s.route("GET /api/items/{id}", "Get payout item details, audit history, actions, conflicts, and notes", s.authed(s.getItem))
+	s.route("POST /api/items/{id}/refresh", "Fetch fresh status from PayPal for an item", s.authed(s.refreshItem))
+	s.route("POST /api/items/{id}/corrected-email", "Record a validated corrected recipient email", s.authed(s.correctedEmail))
+	s.route("POST /api/items/{id}/notes", "Add an operator note to a payout item", s.authed(s.createNote))
+	s.route("GET /api/actions", "List proposed and executed actions", s.authed(s.listActions))
+	s.route("POST /api/actions/{id}/approve", "Approve a proposed action (requires approver name)", s.authed(s.approve))
+	s.route("POST /api/actions/{id}/reject", "Reject a proposed action", s.authed(s.reject))
+	s.route("POST /api/actions/{id}/snooze", "Snooze a proposed action for 1, 3, or 7 days", s.authed(s.snoozeAction))
+	s.route("POST /api/actions/bulk-acknowledge", "Bulk acknowledge non-money-moving actions", s.authed(s.bulkAcknowledge))
+	s.route("GET /api/conflicts", "List conflicts filtered by status (open/resolved)", s.authed(s.listConflicts))
+	s.route("GET /api/conflicts/{id}", "Get details of a single conflict", s.authed(s.getConflict))
+	s.route("POST /api/conflicts/{id}/resolve", "Resolve a conflict with a validated resolution and approver name", s.authed(s.resolveConflict))
+	s.route("POST /api/messages/inbound", "Ingest an inbound or simulated recipient reply message", s.authed(s.inbound))
+	s.route("POST /api/admin/reconcile", "Trigger background reconciliation pass immediately", s.authed(s.reconcile))
+	s.route("POST /api/admin/advance", "Advance simulated time for FAKE items to test expiry windows", s.authed(s.advance))
+	s.route("POST /api/demo/seed", "Seed standard demo payouts", s.authed(s.seed))
+	s.route("GET /api/demo/payouts", "Every demo payout (standard and conflict packs) with its story and what to try.", s.authed(s.demoPayouts))
+	s.route("POST /api/batches/check", "Check proposed recipients for an earlier payout with the same email, amount and currency in the last 7 days.", s.authed(s.checkDuplicates))
+	s.route("POST /api/demo/seed-conflicts", "Seed 7 conflict demo payouts with open conflicts", s.authed(s.seedConflicts))
+	s.route("GET /api/audit", "Query the append-only audit log", s.authed(s.audit))
+	s.route("GET /api/audit/verify", "Verify cryptographic hash chain integrity of the audit log", s.authed(s.auditVerify))
+	s.route("GET /api/audit/export.csv", "Export the complete audit log in CSV format", s.authed(s.exportAuditCSV))
+	s.route("GET /api/reference", "System reference dictionary of routes, statuses, rules, and templates", s.authed(s.reference))
+	s.route("POST /api/bench/run", "Start an automated benchmark run", s.authed(s.benchRun))
+	s.route("GET /api/bench/latest", "Get the latest benchmark run results", s.authed(s.benchLatest))
+	s.route("GET /api/events", "Server-Sent Events stream for real-time dashboard updates", s.authed(s.Hub.ServeHTTP))
+
+	s.mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeErr(w, http.StatusNotFound, "unknown API route") })
+	s.mux.HandleFunc("/", s.spa)
+	return s.middleware(s.mux)
 }
 
 func (s *Server) middleware(next http.Handler) http.Handler {
@@ -359,7 +395,12 @@ func (s *Server) getItem(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, 200, map[string]any{"item": it, "actions": actions, "messages": msgs, "audit": aud, "preflight": pre, "attempts": history})
+	confls, _ := store.ListConflictsByItem(ctx, s.Eng.Store.DB, id)
+	notes, _ := store.ListNotes(ctx, s.Eng.Store.DB, id)
+	writeJSON(w, 200, map[string]any{
+		"item": it, "actions": actions, "messages": msgs, "audit": aud,
+		"preflight": pre, "attempts": history, "conflicts": confls, "notes": notes,
+	})
 }
 
 func (s *Server) refreshItem(w http.ResponseWriter, r *http.Request) {
@@ -546,19 +587,16 @@ func (s *Server) seed(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var made []string
 	if s.Cfg.FakeEnabled {
-		rec := []engine.Recipient{
-			{Name: "Ben Ortiz", Email: "ben.ortiz@example.com", Amount: "120.00", Purpose: "October creator payout"},
-			{Name: "Chen Wei", Email: "chen.wei@example.com", Amount: "85.50", Purpose: "October creator payout"},
-			{Name: "Dana Silva", Email: "dana.silva", Amount: "60.00", Purpose: "Affiliate commission"},
-			{Name: "Eli Novak", Email: "eli.novak@example.com", Amount: "42.00", Purpose: "Affiliate commission", FakeOutcome: "FAILED:RECEIVER_ACCOUNT_LOCKED"},
-			{Name: "Farah Ali", Email: "farah.ali@example.com", Amount: "75.00", Purpose: "Freelance invoice", FakeOutcome: "FAILED:CURRENCY_NOT_SUPPORTED_FOR_RECEIVER"},
-			{Name: "Gus Berg", Email: "gus.berg@example.com", Amount: "30.00", Purpose: "Freelance invoice", FakeOutcome: "FAILED:RECEIVER_COUNTRY_NOT_ALLOWED"},
-			{Name: "Hana Sato", Email: "hana.sato@example.com", Amount: "55.00", Purpose: "Affiliate commission", FakeOutcome: "FAILED:RECEIVING_LIMIT_EXCEEDED"},
-			{Name: "Ivan Petrov", Email: "ivan.petrov@example.com", Amount: "210.00", Purpose: "Creator bonus", FakeOutcome: "ONHOLD"},
-			{Name: "Jade Moore", Email: "jade.moore@example.com", Amount: "99.00", Purpose: "Creator bonus", FakeOutcome: "BLOCKED"},
-			{Name: "Kofi Mensah", Email: "kofi.mensah@example.com", Amount: "150.00", Purpose: "October creator payout"},
-			{Name: "Lena Fox", Email: "lena.fox@example.com", Amount: "65.00", Purpose: "Affiliate commission"},
-			{Name: "Aisha Khan", Email: "aisha.khan@example.com", Amount: "300.00", Purpose: "Creator payout"},
+		var rec []engine.Recipient
+		for _, d := range demo.Standard() {
+			rec = append(rec, engine.Recipient{
+				Name:        d.Name,
+				Email:       d.Email,
+				Amount:      d.Amount,
+				Currency:    d.Currency,
+				Purpose:     d.Purpose,
+				FakeOutcome: d.FakeOutcome,
+			})
 		}
 		if s.Eng.Fake != nil {
 			s.Eng.Fake.Register("aisha.khan@example.com")
@@ -594,4 +632,286 @@ func (s *Server) seed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"created": made})
+}
+
+// ---------- conflicts ----------
+
+func (s *Server) listConflicts(w http.ResponseWriter, r *http.Request) {
+	st := r.URL.Query().Get("status")
+	list, err := store.ListConflicts(r.Context(), s.Eng.Store.DB, st, 200)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, list)
+}
+
+func (s *Server) getConflict(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	c, err := store.GetConflict(r.Context(), s.Eng.Store.DB, id)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, c)
+}
+
+func (s *Server) resolveConflict(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var in struct {
+		Resolution string `json:"resolution"`
+		Approver   string `json:"approver"`
+		Value      string `json:"value"`
+		Note       string `json:"note"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if strings.TrimSpace(in.Approver) == "" {
+		writeErr(w, http.StatusBadRequest, "an approver name is required")
+		return
+	}
+	if err := s.Eng.ResolveConflict(r.Context(), id, in.Approver, in.Resolution, in.Value, in.Note); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]string{"status": "resolved"})
+}
+
+func (s *Server) seedConflicts(w http.ResponseWriter, r *http.Request) {
+	if err := s.Eng.SeedConflicts(r.Context()); err != nil {
+		if errors.Is(err, engine.ErrAlreadySeeded) {
+			writeErr(w, http.StatusConflict, "conflict demo pack already seeded")
+			return
+		}
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"status": "seeded"})
+}
+
+// ---------- notes ----------
+
+func (s *Server) createNote(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var in struct {
+		Author string `json:"author"`
+		Body   string `json:"body"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if strings.TrimSpace(in.Author) == "" {
+		in.Author = "operator"
+	}
+	if strings.TrimSpace(in.Body) == "" {
+		writeErr(w, http.StatusBadRequest, "note body cannot be empty")
+		return
+	}
+	if len(in.Body) > 2000 || len(in.Author) > 80 {
+		writeErr(w, http.StatusBadRequest, "note is too long (max 2000 characters, author max 80)")
+		return
+	}
+	n := &store.Note{
+		ItemID: id,
+		Author: strings.TrimSpace(in.Author),
+		Body:   strings.TrimSpace(in.Body),
+	}
+	ctx := r.Context()
+	if _, err := store.GetItem(ctx, s.Eng.Store.DB, id, false); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := store.InsertNote(ctx, s.Eng.Store.DB, n); err != nil {
+		s.fail(w, err)
+		return
+	}
+	_ = s.Eng.Store.Tx(ctx, func(tx *sql.Tx) error {
+		return store.AppendAudit(ctx, tx, in.Author, "operator_note_added", id, map[string]any{"note_id": n.ID})
+	})
+	s.Hub.Publish("note", map[string]any{"item": id, "note_id": n.ID})
+	writeJSON(w, http.StatusCreated, n)
+}
+
+// ---------- snooze & bulk acknowledge ----------
+
+func (s *Server) snoozeAction(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var in struct {
+		Days int `json:"days"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.Days != 1 && in.Days != 3 && in.Days != 7 {
+		writeErr(w, http.StatusBadRequest, "days must be 1, 3, or 7")
+		return
+	}
+	ctx := r.Context()
+	a, err := store.GetAction(ctx, s.Eng.Store.DB, id, false)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if a.Status != "proposed" {
+		writeErr(w, http.StatusConflict, "only a proposed action can be snoozed")
+		return
+	}
+	err = s.Eng.Store.Tx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `UPDATE actions SET snoozed_until = now() + make_interval(days => $2) WHERE id=$1`, id, in.Days); err != nil {
+			return err
+		}
+		return store.AppendAudit(ctx, tx, "operator", "action_snoozed", a.ItemID, map[string]any{"action_id": id, "days": in.Days})
+	})
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.Hub.Publish("action", map[string]any{"id": id})
+	writeJSON(w, 200, map[string]string{"status": "snoozed"})
+}
+
+func (s *Server) bulkAcknowledge(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		ActionIDs []string `json:"action_ids"`
+		Approver  string   `json:"approver"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if strings.TrimSpace(in.Approver) == "" {
+		writeErr(w, http.StatusBadRequest, "approver name is required")
+		return
+	}
+	if len(in.ActionIDs) > 200 {
+		writeErr(w, http.StatusBadRequest, "at most 200 actions at a time")
+		return
+	}
+	ctx := r.Context()
+	for _, aid := range in.ActionIDs {
+		a, err := store.GetAction(ctx, s.Eng.Store.DB, aid, false)
+		if err != nil {
+			continue
+		}
+		// Invariant: Money-moving actions can NEVER be bulk-approved!
+		if rules.Kind(a.Kind).MoneyMoving() {
+			writeErr(w, http.StatusBadRequest, fmt.Sprintf("action %s is money-moving (%s) and cannot be bulk acknowledged", a.ID, a.Kind))
+			return
+		}
+	}
+	var count int
+	for _, aid := range in.ActionIDs {
+		if _, err := s.Eng.Approve(ctx, aid, in.Approver); err == nil {
+			count++
+		}
+	}
+	writeJSON(w, 200, map[string]any{"acknowledged": count})
+}
+
+// ---------- audit export CSV ----------
+
+// csvSafe stops spreadsheet programs from running a cell that starts with = + - or @ as a formula.
+func csvSafe(v string) string {
+	if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
+		return "'" + v
+	}
+	return v
+}
+
+func (s *Server) exportAuditCSV(w http.ResponseWriter, r *http.Request) {
+	entries, err := store.ListAudit(r.Context(), s.Eng.Store.DB, "", 5000)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"audit_log.csv\"")
+	cw := csv.NewWriter(w)
+	_ = cw.Write([]string{"id", "timestamp", "actor", "event", "item_id", "prev_hash", "hash", "details"})
+	for _, e := range entries {
+		_ = cw.Write([]string{
+			strconv.FormatInt(e.ID, 10),
+			e.TS.Format(time.RFC3339),
+			csvSafe(e.Actor),
+			csvSafe(e.Event),
+			e.ItemID,
+			e.PrevHash,
+			e.Hash,
+			csvSafe(string(e.Details)),
+		})
+	}
+	cw.Flush()
+}
+
+// ---------- reference ----------
+
+func (s *Server) reference(w http.ResponseWriter, r *http.Request) {
+	statuses := []string{
+		string(state.Created), string(state.Pending), string(state.Success),
+		string(state.Unclaimed), string(state.Failed), string(state.OnHold),
+		string(state.Blocked), string(state.Returned), string(state.Refunded),
+		string(state.Reversed), string(state.Canceled), string(state.Unknown),
+	}
+	actionKinds := []string{
+		string(rules.KindNotify), string(rules.KindCancel), string(rules.KindReissue),
+		string(rules.KindEscalate), string(rules.KindFlag),
+	}
+	writeJSON(w, 200, map[string]any{
+		"routes":               s.routes,
+		"statuses":             statuses,
+		"action_kinds":         actionKinds,
+		"template_keys":        ai.TemplateKeys(),
+		"sim_tags":             engine.SimTags,
+		"conflict_resolutions": engine.AllowedResolutions,
+		"rules_matrix":         rules.Matrix(),
+	})
+}
+
+func (s *Server) demoPayouts(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, map[string]any{"standard": demo.Standard(), "conflicts": demo.Conflicts()})
+}
+
+// checkDuplicates warns before a batch is created when it repeats a recent obligation.
+func (s *Server) checkDuplicates(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Recipients []struct {
+			Email    string `json:"email"`
+			Amount   string `json:"amount"`
+			Currency string `json:"currency"`
+		} `json:"recipients"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if len(in.Recipients) > 500 {
+		writeErr(w, http.StatusBadRequest, "too many recipients")
+		return
+	}
+	type dup struct {
+		Index     int    `json:"index"`
+		Email     string `json:"email"`
+		Amount    string `json:"amount"`
+		Currency  string `json:"currency"`
+		ItemID    string `json:"item_id"`
+		CreatedAt string `json:"created_at"`
+	}
+	out := []dup{}
+	since := time.Now().Add(-7 * 24 * time.Hour)
+	for i, rec := range in.Recipients {
+		cur := rec.Currency
+		if cur == "" {
+			cur = "USD"
+		}
+		if !ai.ValidEmail(rec.Email) {
+			continue
+		}
+		found, err := store.RecentDuplicates(r.Context(), s.Eng.Store.DB, rec.Email, rec.Amount, cur, since)
+		if err != nil {
+			continue // a malformed amount simply produces no match; validation happens on create
+		}
+		if len(found) > 0 {
+			out = append(out, dup{Index: i, Email: rec.Email, Amount: rec.Amount, Currency: cur, ItemID: found[0].ID, CreatedAt: found[0].CreatedAt.Format(time.RFC3339)})
+		}
+	}
+	writeJSON(w, 200, map[string]any{"duplicates": out})
 }

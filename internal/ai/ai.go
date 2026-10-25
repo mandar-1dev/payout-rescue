@@ -97,6 +97,7 @@ type Extraction struct {
 	Unclear     bool     `json:"unclear"`
 	Injection   bool     `json:"injection"`
 	Source      string   `json:"source"` // "model" or "fallback"
+	Candidates  []string `json:"candidates,omitempty"`
 	Notes       []string `json:"notes,omitempty"`
 }
 
@@ -183,6 +184,7 @@ func Extract(ctx context.Context, p Provider, text string) Extraction {
 		return ex
 	}
 	emails := uniqueEmails(text)
+	ex.Candidates = emails
 	if p != nil {
 		redacted := text
 		for i, e := range emails {

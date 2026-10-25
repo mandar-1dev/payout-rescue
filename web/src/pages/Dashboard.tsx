@@ -3,8 +3,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { AgGridReact } from 'ag-grid-react'
 import { AllCommunityModule, ModuleRegistry, themeQuartz, type ColDef, type GridApi, type GridState, type ICellRendererParams } from 'ag-grid-community'
-import { api } from '../lib/api'
-import type { Item, Mode, Summary } from '../lib/types'
+import { api, listConflicts, seedConflicts } from '../lib/api'
+import type { Conflict, Item, Mode, Summary } from '../lib/types'
+import { conflictInfo } from './Conflicts'
 import { explain, money, plural } from '../lib/format'
 import { Empty, ErrorNote, LimboRail, ModeBadge, Skeleton, StatusChip, useToast } from '../components/ui'
 
@@ -35,6 +36,12 @@ export function Dashboard() {
   const gridApi = useRef<GridApi<Item> | null>(null)
   const items = useQuery({ queryKey: ['items'], queryFn: () => api<Item[]>('/api/items') })
   const summary = useQuery({ queryKey: ['limbo'], queryFn: () => api<Summary>('/api/limbo') })
+  const openConflicts = useQuery({ queryKey: ['conflicts', 'open'], queryFn: () => listConflicts('open') })
+  const conflictsByItem = useMemo(() => {
+    const m = new Map<string, Conflict[]>()
+    for (const c of openConflicts.data ?? []) m.set(c.item_id, [...(m.get(c.item_id) ?? []), c])
+    return m
+  }, [openConflicts.data])
   const [statuses, setStatuses] = useState<Set<string>>(new Set())
   const [mode, setMode] = useState<'' | Mode>('')
   const [q, setQ] = useState('')
@@ -87,6 +94,14 @@ export function Dashboard() {
             <span className="whitespace-normal text-[12px] leading-tight text-muted">Not in the 30-day window</span>
           ),
       },
+      {
+        headerName: 'Conflict', flex: 1.1, minWidth: 130, valueGetter: (p) => (p.data ? (conflictsByItem.get(p.data.id)?.length ?? 0) : 0),
+        cellRenderer: (p: ICellRendererParams<Item>) => {
+          const cs = p.data ? conflictsByItem.get(p.data.id) : undefined
+          if (!cs?.length) return <span className="text-muted">None</span>
+          return <div className="flex h-full items-center"><span className="chip" style={{ ['--c' as string]: 'var(--brick)' }} title={cs.map((c) => conflictInfo[c.kind]?.title ?? c.kind).join(', ')}>{cs.length === 1 ? (conflictInfo[cs[0].kind]?.title ?? cs[0].kind) : `${cs.length} conflicts`}</span></div>
+        },
+      },
       { headerName: 'Source', flex: 0.9, minWidth: 110, field: 'mode', cellRenderer: (p: ICellRendererParams<Item>) => (p.data ? <div className="flex h-full items-center"><ModeBadge mode={p.data.mode} /></div> : null) },
       {
         headerName: 'Waiting on you', flex: 1, minWidth: 120, field: 'open_actions',
@@ -102,7 +117,7 @@ export function Dashboard() {
         ),
       },
     ],
-    [],
+    [conflictsByItem],
   )
 
   const initialState = useMemo<GridState | undefined>(() => {
@@ -140,6 +155,9 @@ export function Dashboard() {
             {s.next_return_days !== null ? (
               <>The next automatic return by PayPal is in <b>{plural(s.next_return_days, 'day')}</b>. </>
             ) : null}
+            {(s.open_conflicts ?? 0) > 0 && (
+              <Link to="/conflicts" className="font-semibold text-brick underline decoration-brick/40 underline-offset-4">{plural(s.open_conflicts ?? 0, 'conflict')} need a person. </Link>
+            )}
             <span className="text-muted">{plural(s.duplicates_prevented, 'duplicate payment')} prevented so far.</span>
           </p>
         ) : null}
@@ -192,6 +210,7 @@ export function Dashboard() {
             Create a batch, or load the demo data to see stuck, failed and unclaimed payouts.
             <div className="mt-3 flex justify-center gap-2">
               <button className="btn btn-primary" onClick={() => void api('/api/demo/seed', { method: 'POST' }).then(() => toast('Demo data loaded')).catch((e: Error) => toast(e.message, 'error'))}>Load demo data</button>
+              <button className="btn btn-quiet" onClick={() => void seedConflicts().then(() => toast('Conflict pack loaded')).catch((e: Error) => toast(e.message, 'error'))}>Load conflict pack</button>
               <Link className="btn btn-quiet" to="/batches">Create a batch</Link>
             </div>
           </Empty>

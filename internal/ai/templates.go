@@ -54,6 +54,14 @@ var templates = map[string]template{
 		"Your unclaimed payment was cancelled",
 		"Hi {{name}}, your unclaimed payment of {{amount}} {{currency}} was cancelled and returned to us. Reply with your PayPal email if you still want to be paid. Thanks, {{platform}}",
 	},
+	"CLARIFY_EMAIL": {
+		"Please clarify which PayPal email to use",
+		"Hi {{name}}, we received your message regarding your {{amount}} {{currency}} payment, but it included more than one email address. Please reply specifying which email address is linked to your active PayPal account. Thanks, {{platform}}",
+	},
+	"SAME_EMAIL_NOTICE": {
+		"We need a different PayPal email",
+		"Hi {{name}}, the email address you replied with is the same email we already have on file for your {{amount}} {{currency}} payment. That payment could not be completed with this email. Please reply with a different, active PayPal email. Thanks, {{platform}}",
+	},
 }
 
 // TemplateKeys lists the available template keys.

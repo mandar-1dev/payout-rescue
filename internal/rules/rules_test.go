@@ -81,3 +81,23 @@ func TestMoneyMoving(t *testing.T) {
 		t.Fatal("money moving kinds wrong")
 	}
 }
+
+func TestMatrixIsGeneratedFromDecide(t *testing.T) {
+	rows := Matrix()
+	if len(rows) < 30 {
+		t.Fatalf("expected a full matrix, got %d rows", len(rows))
+	}
+	for _, r := range rows {
+		if r.When == "" {
+			t.Fatal("every row needs a description")
+		}
+		for _, p := range r.Proposals {
+			if p.Kind == KindReissue && !r.Corrected {
+				t.Errorf("%s: a replacement must never be proposed without a corrected email", r.When)
+			}
+			if p.Kind == KindReissue && (r.Status == "ONHOLD" || r.Status == "BLOCKED" || r.Status == "UNCLAIMED" || r.Status == "PENDING") {
+				t.Errorf("%s: a replacement must never follow a live item", r.When)
+			}
+		}
+	}
+}

@@ -187,12 +187,14 @@ func (e *Engine) SetCorrectedEmail(ctx context.Context, itemID, email, actor str
 	if !ai.ValidEmail(email) {
 		return errors.New("that is not a valid email address")
 	}
+	var sameEmail bool
 	err := e.Store.Tx(ctx, func(tx *sql.Tx) error {
 		it, err := store.GetItem(ctx, tx, itemID, true)
 		if err != nil {
 			return err
 		}
 		if strings.EqualFold(email, it.RecipientEmail) {
+			sameEmail = true
 			return errors.New("the corrected email is the same as the one on file")
 		}
 		if err := store.SetCorrectedEmail(ctx, tx, it.ID, email); err != nil {
@@ -200,6 +202,9 @@ func (e *Engine) SetCorrectedEmail(ctx context.Context, itemID, email, actor str
 		}
 		return store.AppendAudit(ctx, tx, actor, "corrected_email_recorded", it.ID, map[string]any{"email_domain": email[strings.LastIndex(email, "@")+1:]})
 	})
+	if sameEmail {
+		e.detectEmailSameAsOnFile(ctx, itemID)
+	}
 	if err != nil {
 		return err
 	}
@@ -237,12 +242,31 @@ func (e *Engine) InboundReply(ctx context.Context, itemID, text string) (*store.
 	if err != nil {
 		return nil, ex, err
 	}
-	if !ex.Injection && ex.NewEmail != "" {
-		if err := e.SetCorrectedEmail(ctx, itemID, ex.NewEmail, "extraction"); err != nil {
-			e.log().Info("extracted email not recorded", "item", itemID, "err", err)
+	if ex.Injection {
+		// Nothing from the reply is applied. Evaluate so the flagged item gets its escalation.
+		if err := e.Evaluate(ctx, itemID); err != nil {
+			return msg, ex, err
 		}
-	} else if err := e.Evaluate(ctx, itemID); err != nil {
-		return msg, ex, err
+	} else {
+		if len(ex.Candidates) > 1 {
+			e.detectAmbiguousReply(ctx, itemID, ex.Candidates)
+		}
+		if ex.Refuses {
+			e.detectRefusalVsProposal(ctx, itemID)
+		}
+		recorded := false
+		if ex.NewEmail != "" {
+			if err := e.SetCorrectedEmail(ctx, itemID, ex.NewEmail, "extraction"); err != nil {
+				e.log().Info("extracted email not recorded", "item", itemID, "err", err)
+			} else {
+				recorded = true
+			}
+		}
+		if !recorded {
+			if err := e.Evaluate(ctx, itemID); err != nil {
+				return msg, ex, err
+			}
+		}
 	}
 	e.emit("item", map[string]any{"id": itemID})
 	return msg, ex, nil
@@ -296,6 +320,7 @@ type Summary struct {
 	AuditEntries        int             `json:"audit_entries"`
 	AuditIntact         bool            `json:"audit_intact"`
 	WebhookBypass       bool            `json:"webhook_bypass"`
+	OpenConflicts       int             `json:"open_conflicts"`
 }
 
 func cents(s string) int64 {
@@ -363,6 +388,7 @@ func (e *Engine) Summary(ctx context.Context) (Summary, error) {
 		_ = a
 	}
 	s.DuplicatesPrevented, _ = store.CountAuditEvent(ctx, e.Store.DB, "duplicate_prevented")
+	s.OpenConflicts, _ = store.CountOpenConflicts(ctx, e.Store.DB)
 	s.WebhookEvents, s.WebhookUnprocessed, _ = store.CountEvents(ctx, e.Store.DB)
 	s.AuditEntries, _, _ = store.VerifyAudit(ctx, e.Store.DB)
 	_, broken, _ := store.VerifyAudit(ctx, e.Store.DB)

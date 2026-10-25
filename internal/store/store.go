@@ -178,6 +178,7 @@ type Action struct {
 	ExecutedAt     *time.Time      `json:"executed_at"`
 	Result         json.RawMessage `json:"result"`
 	CreatedAt      time.Time       `json:"created_at"`
+	SnoozedUntil   *time.Time      `json:"snoozed_until,omitempty"`
 }
 
 type Message struct {
@@ -348,7 +349,7 @@ func ListItems(ctx context.Context, q Q, f ItemFilter) ([]Item, error) {
 		add("i.batch_id = $%d", f.BatchID)
 	}
 	if f.Search != "" {
-		add("(l.recipient_name ILIKE '%%' || $%d || '%%' OR i.recipient_email ILIKE '%%' || $%d || '%%')", f.Search)
+		add("(l.recipient_name ILIKE '%%' || $%[1]d || '%%' OR i.recipient_email ILIKE '%%' || $%[1]d || '%%')", f.Search)
 	}
 	query := itemSelect
 	if len(where) > 0 {
@@ -423,12 +424,12 @@ func InsertAction(ctx context.Context, q Q, a *Action) (bool, error) {
 	return err == nil, err
 }
 
-const actionSelect = `SELECT id, item_id, kind, template_key, proposed_by, reason, status, idempotency_key, payload, COALESCE(decided_by,''), decided_at, executed_at, result, created_at FROM actions`
+const actionSelect = `SELECT id, item_id, kind, template_key, proposed_by, reason, status, idempotency_key, payload, COALESCE(decided_by,''), decided_at, executed_at, result, created_at, snoozed_until FROM actions`
 
 func scanAction(r scanner) (*Action, error) {
 	var a Action
 	var payload, result []byte
-	err := r.Scan(&a.ID, &a.ItemID, &a.Kind, &a.TemplateKey, &a.ProposedBy, &a.Reason, &a.Status, &a.IdempotencyKey, &payload, &a.DecidedBy, &a.DecidedAt, &a.ExecutedAt, &result, &a.CreatedAt)
+	err := r.Scan(&a.ID, &a.ItemID, &a.Kind, &a.TemplateKey, &a.ProposedBy, &a.Reason, &a.Status, &a.IdempotencyKey, &payload, &a.DecidedBy, &a.DecidedAt, &a.ExecutedAt, &result, &a.CreatedAt, &a.SnoozedUntil)
 	a.Payload, a.Result = payload, result
 	return &a, err
 }
@@ -446,7 +447,7 @@ func GetAction(ctx context.Context, q Q, id string, forUpdate bool) (*Action, er
 }
 
 func ListActions(ctx context.Context, q Q, status, itemID string, limit int) ([]Action, error) {
-	query := actionSelect + ` WHERE ($1='' OR status=$1) AND ($2='' OR item_id::text=$2) ORDER BY created_at DESC LIMIT $3`
+	query := actionSelect + ` WHERE ($1='' OR status=$1) AND ($2='' OR item_id::text=$2) AND ($1!='proposed' OR $2!='' OR snoozed_until IS NULL OR snoozed_until <= now()) ORDER BY created_at DESC LIMIT $3`
 	rows, err := q.QueryContext(ctx, query, status, itemID, nonZero(limit, 200))
 	if err != nil {
 		return nil, err
@@ -752,4 +753,24 @@ func GetBatchByPayPalID(ctx context.Context, q Q, ppID string) (*Batch, error) {
 		return nil, ErrNotFound
 	}
 	return &b, err
+}
+
+// RecentDuplicates finds earlier payouts to the same email, amount and currency since a time.
+func RecentDuplicates(ctx context.Context, q Q, email, amount, currency string, since time.Time) ([]Item, error) {
+	rows, err := q.QueryContext(ctx, itemSelect+` WHERE (lower(i.recipient_email)=lower($1) OR lower(i.corrected_email)=lower($1)) AND l.amount = $2::numeric AND l.currency = upper($3) AND i.created_at >= $4 AND i.status <> 'FAILED' ORDER BY i.created_at DESC LIMIT 3`,
+		email, amount, currency, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	now := time.Now()
+	var out []Item
+	for rows.Next() {
+		it, err := scanItem(rows, now)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *it)
+	}
+	return out, rows.Err()
 }

@@ -1,8 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { NavLink, Route, Routes } from 'react-router-dom'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, clearToken, useLiveUpdates, getToken } from './lib/api'
-import { useApprover } from './lib/hooks'
+import { useApprover, useShortcuts } from './lib/hooks'
 import type { Session, Summary } from './lib/types'
 import { Mark } from './components/Brand'
 import { Spinner } from './components/ui'
@@ -14,6 +14,11 @@ import { Batches } from './pages/Batches'
 import { Benchmark } from './pages/Benchmark'
 import { Audit } from './pages/Audit'
 import { Setup } from './pages/Setup'
+import { Conflicts } from './pages/Conflicts'
+import { Help } from './pages/Help'
+import { CommandPalette } from './components/CommandPalette'
+import { HelpDrawer } from './components/HelpDrawer'
+import { Tour } from './components/Tour'
 
 type PublicInfo = { auth_required: boolean; platform: string; env: string }
 
@@ -24,9 +29,11 @@ function Icon({ d }: { d: ReactNode }) {
 const nav = [
   { to: '/', label: 'Payouts', end: true, icon: <path d="M3 5h14M3 10h14M3 15h9" /> },
   { to: '/approvals', label: 'Approvals', icon: <path d="M4 10.5l3.5 3.5L16 6" /> },
+  { to: '/conflicts', label: 'Conflicts', icon: <><path d="M10 3l7.5 13h-15z" /><path d="M10 8.5v3.5M10 14.4h.01" /></> },
   { to: '/batches', label: 'Batches', icon: <><rect x="3" y="4" width="14" height="12" rx="2" /><path d="M10 7.5v5M7.5 10h5" /></> },
   { to: '/benchmark', label: 'Benchmark', icon: <path d="M4 16V9M10 16V4M16 16v-5" /> },
   { to: '/audit', label: 'Audit log', icon: <><path d="M5 3h8l3 3v11H5z" /><path d="M8 10h5M8 13h5" /></> },
+  { to: '/help', label: 'Help & guide', icon: <><circle cx="10" cy="10" r="7" /><path d="M8 7.8a2.1 2.1 0 013.6 1.4c0 1.4-1.6 1.6-1.6 2.8M10 14.4h.01" /></> },
   { to: '/setup', label: 'Setup', icon: <><circle cx="10" cy="10" r="2.6" /><path d="M10 3v2.2M10 14.8V17M3 10h2.2M14.8 10H17M5.2 5.2l1.6 1.6M13.2 13.2l1.6 1.6M14.8 5.2l-1.6 1.6M6.8 13.2l-1.6 1.6" /></> },
 ]
 
@@ -42,10 +49,24 @@ function Shell({ session, onSignOut }: { session: Session; onSignOut: () => void
     localStorage.setItem('payoutrescue.theme', theme)
   }, [theme])
 
+  const loc = useLocation()
+  const navigate = useNavigate()
+  const [palette, setPalette] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const openPalette = useCallback(() => { setHelpOpen(false); setPalette(true) }, [])
+  const openHelp = useCallback(() => { setPalette(false); setHelpOpen((v) => !v) }, [])
+  useShortcuts({ palette: openPalette, help: openHelp, go: navigate })
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPalette(false); setHelpOpen(false) } }
+    window.addEventListener('keydown', esc)
+    return () => window.removeEventListener('keydown', esc)
+  }, [])
+
   const pending = summary.data?.needing_action ?? 0
+  const openConflicts = summary.data?.open_conflicts ?? 0
   return (
     <div className="grid min-h-full grid-cols-1 md:grid-cols-[236px_1fr]">
-      <aside className="flex flex-col border-b border-line bg-surface md:sticky md:top-0 md:h-screen md:border-b-0 md:border-r">
+      <aside className="flex flex-col border-b border-line bg-surface print:hidden md:sticky md:top-0 md:h-screen md:border-b-0 md:border-r">
         <div className="flex items-center gap-2.5 px-4 py-4">
           <Mark />
           <div className="leading-tight">
@@ -58,6 +79,7 @@ function Shell({ session, onSignOut }: { session: Session; onSignOut: () => void
             <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => `flex items-center gap-2.5 whitespace-nowrap rounded-md px-3 py-2 font-semibold ${isActive ? 'bg-marine text-marine-ink' : 'text-ink hover:bg-sunken'}`}>
               <Icon d={n.icon} />
               {n.label}
+              {n.to === '/conflicts' && openConflicts > 0 && <span className="ml-auto rounded-full bg-brick px-1.5 text-[11px] font-bold text-white num">{openConflicts}</span>}
               {n.to === '/approvals' && pending > 0 && <span className="ml-auto rounded-full bg-signal px-1.5 text-[11px] font-bold text-white num">{pending}</span>}
             </NavLink>
           ))}
@@ -75,10 +97,14 @@ function Shell({ session, onSignOut }: { session: Session; onSignOut: () => void
       </aside>
 
       <div className="min-w-0">
-        <header className="sticky top-0 z-30 flex flex-wrap items-center gap-3 border-b border-line bg-bg/90 px-5 py-3 backdrop-blur">
+        <header className="sticky top-0 z-30 flex flex-wrap print:hidden items-center gap-3 border-b border-line bg-bg/90 px-5 py-3 backdrop-blur">
           <span className="rounded-md bg-signal/15 px-2 py-0.5 text-[12px] font-bold tracking-wide text-signal" title="No real money moves in this app">SANDBOX</span>
           <span className="text-muted">Nothing here moves real money.</span>
-          <div className="ml-auto md:hidden">
+          <div className="ml-auto flex items-center gap-2">
+            <button className="btn btn-quiet" onClick={openPalette} aria-label="Open the command palette">Search <kbd className="rounded border border-line bg-sunken px-1 font-mono text-[11px]">Ctrl K</kbd></button>
+            <button className="btn btn-quiet" onClick={openHelp} aria-label="Help for this page" title="Help for this page (?)">?</button>
+          </div>
+          <div className="md:hidden">
             <input className="field !w-40" placeholder="Your name" value={approver} onChange={(e) => setApprover(e.target.value)} aria-label="Your name, recorded with every approval" />
           </div>
         </header>
@@ -90,14 +116,19 @@ function Shell({ session, onSignOut }: { session: Session; onSignOut: () => void
             <Route path="/" element={<Dashboard />} />
             <Route path="/items/:id" element={<ItemPage approver={approver} />} />
             <Route path="/approvals" element={<Approvals approver={approver} />} />
+            <Route path="/conflicts" element={<Conflicts approver={approver} />} />
             <Route path="/batches" element={<Batches />} />
             <Route path="/benchmark" element={<Benchmark />} />
             <Route path="/audit" element={<Audit />} />
             <Route path="/setup" element={<Setup />} />
+            <Route path="/help" element={<Help />} />
             <Route path="*" element={<p className="p-6 text-muted">That page does not exist.</p>} />
           </Routes>
         </main>
       </div>
+      <CommandPalette open={palette} onClose={() => setPalette(false)} />
+      <HelpDrawer open={helpOpen} onClose={() => setHelpOpen(false)} path={loc.pathname} />
+      <Tour />
     </div>
   )
 }

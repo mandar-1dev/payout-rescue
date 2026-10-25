@@ -77,3 +77,23 @@ stateDiagram-v2
 ## Modes
 
 Every batch and item is labelled `LIVE_SANDBOX` (real sandbox), `SIMULATED` (PayPal's canned test-value responses, which do not change real state) or `FAKE` (in-memory stand-in). The label appears in the UI and in the benchmark and is never mixed silently.
+
+## Conflicts
+
+A conflict is a payout where the evidence disagrees or a person must decide. They are opened by detectors in the engine (never by the UI) and deduplicated by a `dedupe_key`:
+
+| Kind | Opened when | Allowed resolutions |
+|---|---|---|
+| `claim_race` | A cancel or replacement was refused, or withdrawn, because the item became SUCCESS | acknowledge |
+| `ambiguous_reply` | A reply contained more than one email | use_email (one of the candidates), ask_again, dismiss |
+| `email_same_as_on_file` | The "corrected" email is the one already on file | ask_again, dismiss |
+| `refusal_vs_proposal` | The recipient refuses while a cancel or replacement is proposed | withdraw_proposals, keep_proposals (note required) |
+| `held_with_correction` | ONHOLD or BLOCKED, yet a corrected email exists | wait, escalate |
+| `attempts_exhausted` | The last attempt is dead and a corrected email exists | close_unpaid, paid_manually (note required) |
+| `status_disagreement` | PayPal reported an illegal transition | refresh_now (only if now consistent), accept_and_close |
+
+**Resolutions never move money.** They may record a validated email, withdraw a proposal, draft a message, create an ordinary proposal (which still needs its own approval), or close the case. Every resolution needs a named approver and is audited as `conflict_resolved`. Stale proposals (a cancel whose payout was claimed) are rejected by the system as `action_superseded`.
+
+## Generated documentation
+
+`GET /api/reference` returns the registered routes (each registered together with its description), the conflict resolutions and a rules matrix produced by running `rules.Decide` over every situation. `GET /api/demo/payouts` returns the demo packs from `internal/demo`. The Help page renders these, so it cannot drift from the code.

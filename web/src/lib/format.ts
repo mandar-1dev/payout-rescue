@@ -16,8 +16,18 @@ export function plural(n: number, one: string, many = one + 's'): string {
   return `${n} ${n === 1 ? one : many}`
 }
 
+export const formatMoney = money
+
+export function timeAgo(iso: string): string {
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000
+  if (diff < 60) return 'just now'
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  return `${Math.floor(diff / 86400)}d ago`
+}
+
 /** Plain-language explanations for PayPal's documented payout error names. */
-const explanations: Record<string, string> = {
+export const explanations: Record<string, string> = {
   INVALID_EMAIL: "The email on file isn't a valid PayPal email.",
   INVALID_EMAIL_ID: "The email on file isn't a valid PayPal email.",
   RECEIVER_UNREGISTERED: 'The recipient has no PayPal account for this email.',

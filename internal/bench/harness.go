@@ -127,6 +127,16 @@ func (h *prH) Operate() {
 	}
 }
 
+func (h *prH) Script(email, status, errName string) { h.f.SetOutcome(email, status, errName) }
+
+// Flip makes the fake report another status and reads the payout back, like a webhook would.
+func (h *prH) Flip(key, status string) {
+	if it := h.latest(key); it != nil {
+		h.f.SetStatus(it.PayPalItemID, status, "")
+		_ = h.e.ProcessItem(h.ctx, it.ID)
+	}
+}
+
 func (h *prH) DropNextCreate() { h.f.DropResponse = 1 }
 func (h *prH) FailNextCreate() { h.f.FailCreate = 1 }
 
@@ -189,9 +199,20 @@ func (h *prH) Outcome() Outcome {
 			ok = false
 		}
 	}
+	var kinds []string
+	if rows, err := h.st.DB.QueryContext(h.ctx, `SELECT kind FROM conflicts WHERE status='open' ORDER BY kind`); err == nil {
+		for rows.Next() {
+			var k string
+			_ = rows.Scan(&k)
+			kinds = append(kinds, k)
+		}
+		rows.Close()
+	}
 	return Outcome{
 		DuplicatePayment: len(h.f.Duplicates()),
 		Paid:             paidOnceCount(h.f),
+		MaxAttempt:       h.count(`SELECT coalesce(max(attempt),0) FROM payout_items`),
+		Conflicts:        kinds,
 		UnsafeRetries: h.count(`SELECT count(*) FROM payout_items i JOIN payout_items o ON o.id = i.original_item_id
 			WHERE o.status IN ('ONHOLD','BLOCKED') OR o.error_code IN ('RECEIVER_COUNTRY_NOT_ALLOWED','REGULATORY_BLOCKED','RISK_DECLINE','DUPLICATE_ITEM','CURRENCY_NOT_SUPPORTED_FOR_RECEIVER')`),
 		UnnoticedReturns: h.count(`SELECT count(*) FROM payout_items i WHERE i.status='RETURNED' AND NOT EXISTS
@@ -372,3 +393,6 @@ func (n *naive) Outcome() Outcome {
 	o.Ok = true
 	return o
 }
+
+func (n *naive) Script(email, status, errName string) { n.f.SetOutcome(email, status, errName) }
+func (n *naive) Flip(key, status string)              {}

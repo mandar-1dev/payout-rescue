@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api } from '../lib/api'
+import { addNote, api } from '../lib/api'
 import { explain, money, when } from '../lib/format'
 import type { AuditEntry, ItemDetail, Message } from '../lib/types'
 import { ActionCard } from '../components/ActionCard'
 import { ErrorNote, LimboRail, ModeBadge, Skeleton, StatusChip, useToast } from '../components/ui'
+import { conflictInfo } from './Conflicts'
 
 const presets: { label: string; text: string }[] = [
   { label: 'Clean reply', text: 'Thanks for letting me know! My PayPal email is jordan.rivera@example.com' },
@@ -33,6 +34,11 @@ function describe(e: AuditEntry): string | null {
     case 'reissue_reserved': return `Replacement reserved (attempt ${String(d.attempt)})`
     case 'duplicate_prevented': return `Duplicate payment prevented: ${String(d.reason)}`
     case 'cancel_skipped': return `Cancel skipped: item is ${String(d.status)}`
+    case 'conflict_opened': return `Conflict opened: ${String(d.summary ?? d.kind)}`
+    case 'conflict_resolved': return `${e.actor} resolved a conflict (${String(d.resolution)})${d.note ? `: ${String(d.note)}` : ''}`
+    case 'action_snoozed': return `${e.actor} snoozed a decision for ${String(d.days)} days`
+    case 'action_superseded': return `A waiting ${String(d.kind)} no longer applied and was withdrawn (payout is ${String(d.current_status)})`
+    case 'operator_note_added': return `${e.actor} added a note`
     case 'illegal_transition_ignored': return `Ignored an impossible change ${String(d.from)} → ${String(d.to)}; flagged for review`
     default: return null
   }
@@ -66,6 +72,7 @@ export function ItemPage({ approver }: { approver: string }) {
   const q = useQuery({ queryKey: ['item', id], queryFn: () => api<ItemDetail>(`/api/items/${id}`) })
   const [reply, setReply] = useState('')
   const [email, setEmail] = useState('')
+  const [noteText, setNoteText] = useState('')
 
   const send = useMutation({
     mutationFn: (text: string) => api<{ extraction: { injection: boolean; new_email: string } }>('/api/messages/inbound', { method: 'POST', json: { item_id: id, text } }),
@@ -81,6 +88,11 @@ export function ItemPage({ approver }: { approver: string }) {
     onSuccess: () => { toast('Corrected email recorded.'); setEmail(''); void qc.invalidateQueries() },
     onError: (e: Error) => toast(e.message, 'error'),
   })
+  const addNoteMut = useMutation({
+    mutationFn: () => addNote(id, approver.trim() || 'operator', noteText.trim()),
+    onSuccess: () => { toast('Note added.'); setNoteText(''); void qc.invalidateQueries() },
+    onError: (e: Error) => toast(e.message, 'error'),
+  })
   const refresh = useMutation({
     mutationFn: () => api(`/api/items/${id}/refresh`, { method: 'POST' }),
     onSuccess: () => { toast('Read back from PayPal.'); void qc.invalidateQueries() },
@@ -90,6 +102,8 @@ export function ItemPage({ approver }: { approver: string }) {
   if (q.isLoading) return <div className="space-y-4"><Skeleton className="h-24" /><Skeleton className="h-64" /></div>
   if (q.error || !q.data) return <ErrorNote error={q.error ?? new Error('Not found')} />
   const { item, actions, messages, audit, preflight, attempts } = q.data
+  const notes = q.data.notes ?? []
+  const openConflicts = (q.data.conflicts ?? []).filter((c) => c.status === 'open')
   const open = actions.filter((a) => a.status === 'proposed')
   const done = actions.filter((a) => a.status !== 'proposed')
   const msgByAction = new Map(messages.filter((m) => m.action_id).map((m) => [m.action_id, m]))
@@ -97,7 +111,11 @@ export function ItemPage({ approver }: { approver: string }) {
 
   return (
     <div className="space-y-5">
-      <nav className="text-muted"><Link to="/" className="hover:underline">Payouts</Link> / {item.recipient_name}</nav>
+      <nav className="text-muted print:hidden"><Link to="/" className="hover:underline">Payouts</Link> / {item.recipient_name}</nav>
+      <div className="hidden print:block">
+        <h1 className="text-xl font-bold">PayoutRescue payout report</h1>
+        <p>Printed {new Date().toLocaleString()} · Sandbox only · Payout id {item.id}</p>
+      </div>
 
       <section className="panel rise p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -109,7 +127,8 @@ export function ItemPage({ approver }: { approver: string }) {
             <span className="num text-xl font-bold">{money(item.amount, item.currency)}</span>
             <StatusChip status={item.status} />
             <ModeBadge mode={item.mode} />
-            <button className="btn btn-quiet" disabled={refresh.isPending} onClick={() => refresh.mutate()}>Read back from PayPal</button>
+            <button className="btn btn-quiet print:hidden" disabled={refresh.isPending} onClick={() => refresh.mutate()}>Read back from PayPal</button>
+            <button className="btn btn-quiet print:hidden" onClick={() => window.print()}>Print report</button>
           </div>
         </div>
         <p className="mt-2">{explain(item.status, item.error_code)}{item.needs_review && <b className="ml-2 text-brick">Flagged for manual review.</b>}</p>
@@ -120,6 +139,14 @@ export function ItemPage({ approver }: { approver: string }) {
           </div>
         )}
       </section>
+
+      {openConflicts.length > 0 && (
+        <section role="alert" className="rounded-lg border border-brick/40 bg-brick/10 p-4">
+          <p className="font-bold text-brick">{openConflicts.length === 1 ? 'This payout has a conflict that needs a person.' : `This payout has ${openConflicts.length} conflicts that need a person.`}</p>
+          <ul className="mt-1 list-disc pl-5">{openConflicts.map((c) => <li key={c.id}><b>{conflictInfo[c.kind]?.title ?? c.kind}:</b> {c.summary}</li>)}</ul>
+          <Link to="/conflicts" className="btn btn-quiet mt-3 print:hidden">Open Conflicts</Link>
+        </section>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-[1fr_1.15fr]">
         <div className="space-y-5">
@@ -157,6 +184,17 @@ export function ItemPage({ approver }: { approver: string }) {
                 <input className="field" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" />
               </label>
               <button className="btn btn-quiet" disabled={!email.trim() || setCorrected.isPending} onClick={() => setCorrected.mutate()}>Record email</button>
+            </div>
+          </section>
+
+          <section className="panel p-4">
+            <h2 className="h-section mb-3">Notes</h2>
+            {notes.length === 0 ? <p className="text-muted">No notes yet.</p> : (
+              <ul className="space-y-2">{notes.map((n) => <li key={n.id} className="rounded-md bg-sunken p-2.5"><p className="whitespace-pre-wrap">{n.body}</p><p className="mt-1 text-[12px] text-muted">{n.author} · {when(n.created_at)}</p></li>)}</ul>
+            )}
+            <div className="mt-3 flex flex-wrap items-end gap-2 print:hidden">
+              <label className="min-w-64 flex-1"><span className="mb-1 block font-semibold">Add a note</span><textarea className="field min-h-16" maxLength={2000} value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="For example: called the recipient, waiting for a reply" /></label>
+              <button className="btn btn-quiet" disabled={!noteText.trim() || addNoteMut.isPending} onClick={() => addNoteMut.mutate()}>Add note</button>
             </div>
           </section>
 

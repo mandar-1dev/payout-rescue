@@ -128,6 +128,9 @@ func (e *Engine) runCancel(ctx context.Context, actionID string) error {
 	cur, _ := store.GetItem(ctx, e.Store.DB, it.ID, false)
 	if cur.Status != state.Unclaimed {
 		_ = e.audit(ctx, "system", "cancel_skipped", it.ID, map[string]any{"status": cur.Status})
+		if cur.Status == state.Success {
+			e.detectClaimRace(ctx, cur.ID, "cancel")
+		}
 		_ = e.Evaluate(ctx, it.ID)
 		return fail(fmt.Sprintf("item is no longer unclaimed (status %s); nothing was cancelled", cur.Status), nil)
 	}
@@ -137,6 +140,10 @@ func (e *Engine) runCancel(ctx context.Context, actionID string) error {
 		if errors.As(cerr, &ae) && (ae.Name == "ITEM_INCORRECT_STATUS" || ae.Name == "ITEM_ALREADY_CANCELLED") {
 			if info2, rerr := e.readItem(ctx, cur); rerr == nil {
 				_, _ = e.applyInfo(ctx, cur.ID, info2, "paypal")
+			}
+			cur2, _ := store.GetItem(ctx, e.Store.DB, cur.ID, false)
+			if cur2.Status == state.Success {
+				e.detectClaimRace(ctx, cur2.ID, "cancel")
 			}
 			_ = e.Evaluate(ctx, cur.ID)
 			return fail("PayPal refused the cancel ("+ae.Name+"); state was refreshed", nil)
@@ -211,6 +218,9 @@ func (e *Engine) runReissue(ctx context.Context, actionID string) error {
 		cur, _ := store.GetItem(ctx, e.Store.DB, orig.ID, false)
 		if !cur.Status.ReissueSafe() {
 			_ = e.audit(ctx, "system", "duplicate_prevented", cur.ID, map[string]any{"reason": "original not confirmed dead", "status": cur.Status})
+			if cur.Status == state.Success {
+				e.detectClaimRace(ctx, cur.ID, "reissue")
+			}
 			_ = e.Evaluate(ctx, cur.ID)
 			return fail(fmt.Sprintf("original is %s, not confirmed FAILED, RETURNED or CANCELED; re-issue refused", cur.Status), nil)
 		}

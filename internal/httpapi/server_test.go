@@ -33,7 +33,7 @@ func newServer(t *testing.T) *httptest.Server {
 	if err := st.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB.ExecContext(ctx, `TRUNCATE bench_runs, messages, actions, webhook_events, audit_log, payout_items, payout_batches, logical_payouts RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := st.DB.ExecContext(ctx, `TRUNCATE conflicts, notes, bench_runs, messages, actions, webhook_events, audit_log, payout_items, payout_batches, logical_payouts RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatal(err)
 	}
 	hub := sse.New()
@@ -134,5 +134,48 @@ func TestBatchValidationApprovalAndWebhook(t *testing.T) {
 	}
 	if r, _ := do(t, srv, "POST", "/api/actions/00000000-0000-0000-0000-000000000000/approve", "tok", map[string]any{"approver": "x"}); r.StatusCode != 404 {
 		t.Fatalf("unknown action must be 404, got %d", r.StatusCode)
+	}
+}
+
+func TestConflictsEndpointsAndDescriptions(t *testing.T) {
+	srv := newServer(t)
+
+	// 1. Conflicts endpoints require token
+	if r, _ := do(t, srv, "GET", "/api/conflicts", "", nil); r.StatusCode != 401 {
+		t.Fatalf("unauthenticated GET /api/conflicts must be 401, got %d", r.StatusCode)
+	}
+	if r, _ := do(t, srv, "GET", "/api/conflicts/00000000-0000-0000-0000-000000000000", "", nil); r.StatusCode != 401 {
+		t.Fatalf("unauthenticated GET /api/conflicts/{id} must be 401, got %d", r.StatusCode)
+	}
+	if r, _ := do(t, srv, "POST", "/api/conflicts/00000000-0000-0000-0000-000000000000/resolve", "", nil); r.StatusCode != 401 {
+		t.Fatalf("unauthenticated POST /api/conflicts/{id}/resolve must be 401, got %d", r.StatusCode)
+	}
+
+	// 2. Seed-conflicts returns 201 the first time, 409 the second time
+	r, out := do(t, srv, "POST", "/api/demo/seed-conflicts", "tok", nil)
+	if r.StatusCode != 201 {
+		t.Fatalf("first seed-conflicts must be 201, got %d: %v", r.StatusCode, out)
+	}
+	r2, out2 := do(t, srv, "POST", "/api/demo/seed-conflicts", "tok", nil)
+	if r2.StatusCode != 409 {
+		t.Fatalf("second seed-conflicts must be 409, got %d: %v", r2.StatusCode, out2)
+	}
+
+	// 3. Every route in reference has a non-empty description
+	rRef, outRef := do(t, srv, "GET", "/api/reference", "tok", nil)
+	if rRef.StatusCode != 200 {
+		t.Fatalf("GET /api/reference failed: %d", rRef.StatusCode)
+	}
+	routesRaw, ok := outRef["routes"].([]any)
+	if !ok || len(routesRaw) == 0 {
+		t.Fatalf("expected non-empty routes in reference: %v", outRef)
+	}
+	for _, raw := range routesRaw {
+		rt := raw.(map[string]any)
+		pat, _ := rt["pattern"].(string)
+		doc, _ := rt["doc"].(string)
+		if strings.TrimSpace(doc) == "" {
+			t.Errorf("route %q has empty description", pat)
+		}
 	}
 }

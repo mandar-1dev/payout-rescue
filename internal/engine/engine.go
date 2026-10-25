@@ -350,6 +350,7 @@ func (e *Engine) applyInfo(ctx context.Context, itemID string, info paypal.ItemI
 	}
 	newSt := state.Parse(info.TransactionStatus)
 	code := rules.NormalizeError(info.ErrorName)
+	var illegal bool
 	err = e.Store.Tx(ctx, func(tx *sql.Tx) error {
 		it, err := store.GetItem(ctx, tx, itemID, true)
 		if err != nil {
@@ -376,12 +377,16 @@ func (e *Engine) applyInfo(ctx context.Context, itemID string, info paypal.ItemI
 			changed = true
 			return store.AppendAudit(ctx, tx, actor, "status_changed", it.ID, map[string]any{"from": it.Status, "to": newSt, "error": code, "mode": it.Mode})
 		default:
+			illegal = true
 			if err := store.SetNeedsReview(ctx, tx, it.ID, true); err != nil {
 				return err
 			}
 			return store.AppendAudit(ctx, tx, actor, "illegal_transition_ignored", it.ID, map[string]any{"from": it.Status, "to": newSt})
 		}
 	})
+	if illegal {
+		e.detectStatusDisagreement(ctx, itemID)
+	}
 	if changed {
 		e.emit("item", map[string]any{"id": itemID})
 	}
@@ -470,6 +475,10 @@ func actionKey(it *store.Item, p rules.Proposal) string {
 
 // Evaluate applies the rules to an item and stores any new proposals.
 func (e *Engine) Evaluate(ctx context.Context, itemID string) error {
+	e.supersedeStaleProposals(ctx, itemID)
+	e.detectHeldWithCorrection(ctx, itemID)
+	e.detectAttemptsExhausted(ctx, itemID)
+
 	it, err := store.GetItem(ctx, e.Store.DB, itemID, false)
 	if err != nil {
 		return err

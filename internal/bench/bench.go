@@ -26,13 +26,15 @@ import (
 const AssumedManualStepsPerException = 7
 
 type Outcome struct {
-	Skipped          bool `json:"skipped"`
-	DuplicatePayment int  `json:"duplicate_payments"`
-	UnsafeRetries    int  `json:"unsafe_retries"`
-	UnnoticedReturns int  `json:"unnoticed_returns"`
-	ManualSteps      int  `json:"manual_steps"`
-	Paid             int  `json:"paid_once"`
-	Ok               bool `json:"ok"`
+	Skipped          bool     `json:"skipped"`
+	DuplicatePayment int      `json:"duplicate_payments"`
+	UnsafeRetries    int      `json:"unsafe_retries"`
+	UnnoticedReturns int      `json:"unnoticed_returns"`
+	ManualSteps      int      `json:"manual_steps"`
+	Paid             int      `json:"paid_once"`
+	MaxAttempt       int      `json:"max_attempt"`
+	Conflicts        []string `json:"conflicts,omitempty"`
+	Ok               bool     `json:"ok"`
 }
 
 type ScenarioResult struct {
@@ -88,6 +90,8 @@ type Harness interface {
 	DropNextCreate()
 	FailNextCreate()
 	Chaos(kind string, key string)
+	Script(email, status, errName string)
+	Flip(key, status string)
 	Outcome() Outcome
 	Close()
 }
@@ -262,6 +266,75 @@ func scenarios() []scenario {
 			h.Advance(20)
 			h.Operate()
 		}, expect: safeAndNoRetry})
+	// H. Conflicts (7): each must be DETECTED through the real flows, with zero duplicate payments
+	// and nothing paid by the system itself. A retry script has no notion of a conflict.
+	hasKind := func(kind string) func(Outcome) bool {
+		return func(o Outcome) bool {
+			for _, k := range o.Conflicts {
+				if k == kind {
+					return o.DuplicatePayment == 0
+				}
+			}
+			return false
+		}
+	}
+	add(scenario{id: "H01", group: "Conflicts", name: "Claim race: recipient claims after a cancel was proposed", prOnly: true,
+		run: func(h Harness) {
+			k := h.Create("claimrace@example.com")
+			h.Advance(2)
+			h.Correct(k, "alt-race@example.com", false)
+			h.Claim(k)
+			h.Operate()
+		},
+		expect: func(o Outcome) bool { return hasKind("claim_race")(o) && o.Paid == 1 }})
+	add(scenario{id: "H02", group: "Conflicts", name: "Ambiguous reply: two different emails", prOnly: true,
+		run: func(h Harness) {
+			k := h.Create("ambig@example.com")
+			h.Reply(k, "use ambig.one@example.com or ambig.two@example.com")
+			h.Operate()
+		},
+		expect: func(o Outcome) bool { return hasKind("ambiguous_reply")(o) && o.Paid == 0 }})
+	add(scenario{id: "H03", group: "Conflicts", name: "Email same as on file: the reply repeats the failing address", prOnly: true,
+		run: func(h Harness) {
+			k := h.CreateScripted("same@example.com", "FAILED", "RECEIVER_ACCOUNT_LOCKED")
+			h.Reply(k, "please use same@example.com")
+			h.Operate()
+		},
+		expect: func(o Outcome) bool { return hasKind("email_same_as_on_file")(o) && o.Paid == 0 }})
+	add(scenario{id: "H04", group: "Conflicts", name: "Refusal while a cancel is waiting for approval", prOnly: true,
+		run: func(h Harness) {
+			k := h.Create("refusal@example.com")
+			h.Correct(k, "refusal.temp@example.com", false)
+			h.Reply(k, "no thanks, I do not want it")
+		},
+		expect: func(o Outcome) bool { return hasKind("refusal_vs_proposal")(o) && o.Paid == 0 }})
+	add(scenario{id: "H05", group: "Conflicts", name: "On hold at PayPal, but a corrected email arrives", prOnly: true,
+		run: func(h Harness) {
+			k := h.CreateScripted("held-conf@example.com", "ONHOLD", "")
+			h.Correct(k, "held-new@example.com", true)
+			h.Operate()
+		},
+		expect: func(o Outcome) bool { return hasKind("held_with_correction")(o) && o.Paid == 0 && o.UnsafeRetries == 0 }})
+	add(scenario{id: "H06", group: "Conflicts", name: "Three attempts used, then another corrected email", prOnly: true,
+		run: func(h Harness) {
+			k := h.CreateScripted("exhausted@example.com", "FAILED", "INVALID_EMAIL")
+			for i := 1; i <= 3; i++ {
+				h.Script(fmt.Sprintf("exhausted.fix%d@example.com", i), "FAILED", "INVALID_EMAIL")
+			}
+			for i := 1; i <= 3; i++ {
+				h.Correct(k, fmt.Sprintf("exhausted.fix%d@example.com", i), false)
+				h.Operate()
+			}
+		},
+		expect: func(o Outcome) bool { return hasKind("attempts_exhausted")(o) && o.MaxAttempt <= 3 && o.Paid == 0 }})
+	add(scenario{id: "H07", group: "Conflicts", name: "PayPal reports an impossible status change", prOnly: true,
+		run: func(h Harness) {
+			k := h.Create("disagree@example.com")
+			h.Claim(k)
+			h.Operate()
+			h.Flip(k, "UNCLAIMED")
+		},
+		expect: func(o Outcome) bool { return hasKind("status_disagreement")(o) && o.Paid == 1 }})
 	return all
 }
 
