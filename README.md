@@ -1,152 +1,343 @@
-# PayoutRescue
+# 🛡️ PAYOUTRESCUE
 
-**Rescue stuck PayPal payouts safely. Human-approved, never double-pays. Sandbox only.**
+### 🚀 RESCUE. RECONCILE. RESOLVE.
 
-PayoutRescue is a post-send control room for [PayPal Payouts](https://developer.paypal.com/api/payouts). After a batch is sent it watches every item, explains each non-success state in plain language, proposes the safe next step, and makes paying the same person twice structurally impossible. A language model drafts messages and reads messy recipient replies; deterministic code decides; a named human approves every action that moves money.
+**The Intelligent PayPal Payout Recovery & Safety Platform**
 
-Built for the PayPal AI Hackathon 2026. **Everything runs against the PayPal sandbox. No real money moves, and the server refuses to start against any other PayPal URL.**
+> Turning failed payouts into actionable workflows — with AI assistance, deterministic safety rules, and human-approved financial actions.
 
-## The problem
+![Go](https://img.shields.io/badge/GO-00ADD8?style=for-the-badge&logo=go&logoColor=white)
+![React](https://img.shields.io/badge/REACT-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
+![TypeScript](https://img.shields.io/badge/TYPESCRIPT-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/POSTGRESQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/DOCKER-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![AI Assisted](https://img.shields.io/badge/AI-ASSISTED-8B5CF6?style=for-the-badge)
+![Sandbox Only](https://img.shields.io/badge/PAYMENTS-SANDBOX_ONLY-F59E0B?style=for-the-badge)
 
-Platforms that pay many people (creators, freelancers, affiliates) send batches through PayPal Payouts, but items often do not complete. They end up `UNCLAIMED`, `FAILED`, `ONHOLD`, `BLOCKED`, `RETURNED` and more, and each needs a different next step. Unclaimed money is returned automatically after 30 days. Operators chase this by hand, and the dangerous mistake is re-sending a "stuck" payout and then having the original succeed too.
+**Built for the PayPal AI Hackathon 2026**
 
-## What it does
+---
 
-| Capability | How |
+## 🌟 THE VISION
+
+**PayoutRescue is a post-send control room for PayPal Payouts.**
+
+Payout failures create operational friction. Teams must investigate errors, communicate with recipients, reconcile delayed updates, and determine whether a payout is safe to retry.
+
+PayoutRescue brings these workflows into one interface.
+
+| 🔴 THE CHALLENGE | 🟢 THE APPROACH |
 |---|---|
-| Track every item | Webhooks + a reconciler that reads whole batches, so missed or late webhooks are recovered |
-| Explain errors | PayPal's documented error names mapped to plain language and to a rules table |
-| Propose, don't act | Rules propose cancel / replace / notify / escalate. Money-moving actions need a named approver |
-| Never pay twice | One live item per payout enforced by a database index, a fresh PayPal readback before any replacement, deterministic ids so retries replay instead of duplicating |
-| Read replies safely | Emails are found by code, hidden from the model, validated afterwards. A deterministic guard blocks instructions and amounts before any model call |
-| Show the work | A visible 30-day rail, the exact request that would be sent, safety checks that must pass, and a hash-chained audit log |
+| Failed or delayed payouts | Clear status explanations and actionable recommendations |
+| Confusing provider errors | Plain-language guidance and deterministic rules |
+| Risk of duplicate payments | Idempotency, fresh status checks, and database constraints |
+| Repetitive recipient communication | AI-assisted message drafting and reply interpretation |
+| Difficult investigations | Timelines, conflict workflows, and an audit trail |
 
-## More than the basics
+---
 
-| Feature | Where |
+## 💎 WHAT MAKES PAYOUTRESCUE DIFFERENT?
+
+### 🧠 AI ASSISTANCE + DETERMINISTIC CONTROL
+
+AI helps operators understand recipient replies and draft communication. It does **not** independently authorize money movement.
+
+### 🔒 SAFETY BEFORE ACTION
+
+Every proposed money-moving action passes through the application's safety workflow and requires human approval.
+
+### 🔁 RECONCILIATION BY DESIGN
+
+Webhooks and periodic reconciliation help the system recover from missed or delayed updates.
+
+### 📊 OPERATIONAL VISIBILITY
+
+Operators can inspect payout states, recommendations, timelines, conflicts, and audit history in one place.
+
+---
+
+## ✨ FEATURE MATRIX
+
+| Feature | Description |
 |---|---|
-| **Conflicts**: seven kinds of payouts where the evidence disagrees (claim race, ambiguous reply, repeated email, refusal, held with a correction, attempts exhausted, status disagreement). Each has a small set of allowed resolutions and none of them can move money | Conflicts page, `internal/engine/conflicts.go` |
-| **Help & guide**: search with highlighting, deep links, print layout, every demo payout, a rules table generated by running the real rules, and an API reference generated from the registered routes | Help & guide page |
-| Command palette (Ctrl/Cmd+K), `?` help drawer for the current page, `g` then `p` / `a` / `c` / `b` shortcuts, first-run tour | everywhere |
-| Safe bulk acknowledge for messages and notes (money-moving decisions have no checkbox), snooze 1/3/7 days | Approvals |
-| CSV import with a validated preview, and a warning when a batch repeats a payout from the last 7 days | Batches |
-| Operator notes, one-page print report per payout, audit log CSV export (formula-safe) | Payout page, Audit log |
+| 🔎 **Payout Tracking** | Track payout batches and individual item statuses. |
+| 🚨 **Failure Intelligence** | Translate payout errors into explanations and recommended next steps. |
+| 🧠 **AI Communication Assistant** | Draft recipient messages and help interpret replies. |
+| 🔐 **Human Approval Workflow** | Keep money-moving decisions under operator control. |
+| ♻️ **Duplicate-Payment Safeguards** | Combine deterministic request IDs, readbacks, and database constraints. |
+| 🔄 **Reconciliation Engine** | Recheck provider state to help recover missed updates. |
+| 🧾 **Audit Trail** | Maintain a hash-chained record of workflow activity. |
+| ⚔️ **Conflict Resolution** | Investigate ambiguous or conflicting payout situations. |
+| 📥 **CSV Batch Import** | Preview and validate imported payout data. |
+| ⚡ **Operator Productivity** | Keyboard shortcuts, command palette, notes, snoozing, and reports. |
 
-## Quick start (no PayPal credentials needed)
+---
 
-Fake mode (an in-memory PayPal stand-in) works out of the box and can also show `ONHOLD`, `BLOCKED`, the day-30 return and late claims.
+## 🚦 PAYOUT STATUS INTELLIGENCE
+
+PayoutRescue supports workflows involving statuses such as:
+
+![UNCLAIMED](https://img.shields.io/badge/UNCLAIMED-64748B?style=flat-square)
+![FAILED](https://img.shields.io/badge/FAILED-EF4444?style=flat-square)
+![ONHOLD](https://img.shields.io/badge/ONHOLD-F59E0B?style=flat-square)
+![BLOCKED](https://img.shields.io/badge/BLOCKED-DC2626?style=flat-square)
+![RETURNED](https://img.shields.io/badge/RETURNED-8B5CF6?style=flat-square)
+![REFUNDED](https://img.shields.io/badge/REFUNDED-0EA5E9?style=flat-square)
+![REVERSED](https://img.shields.io/badge/REVERSED-475569?style=flat-square)
+
+The application maps documented error names to explanations and rule-based recommendations. Exact provider behavior must still be verified against the PayPal sandbox.
+
+---
+
+## 🛡️ SECURITY & SAFETY ARCHITECTURE
+
+**Financial workflows require safeguards, not just suggestions.**
+
+- 🔐 **Sandbox lock:** startup refuses a non-sandbox PayPal base URL.
+- 👤 **Human approval:** money-moving actions require a named approver.
+- 🔍 **Fresh readbacks:** replacement workflows check the provider's current state.
+- 🔁 **Idempotent retries:** deterministic request IDs help retries reuse the same operation.
+- 🗄️ **Database constraints:** enforce the configured one-live-item-per-payout invariant.
+- 🧠 **AI boundaries:** deterministic validation and safety checks constrain model-assisted workflows.
+- 🧾 **Auditability:** workflow activity is recorded in a hash-chained audit log.
+- 🪝 **Webhook verification:** signature verification is used for real events when configured.
+
+> ⚠️ **SANDBOX ONLY — NO REAL MONEY MOVES.** These safeguards do not imply that every possible provider failure has been tested.
+
+---
+
+## ⚡ GET STARTED IN MINUTES
+
+### 🐳 OPTION 1 — DOCKER COMPOSE
 
 ```bash
-docker compose up --build        # app on http://localhost:8080, token: dev-token
+docker compose up --build
 ```
 
-or without Docker for the app:
+Open **http://localhost:8080**
+
+Then:
+
+1. 🔑 Use the development token: `dev-token`
+2. 📊 Click **Load demo data**
+3. ⚔️ Click **Load conflict pack**
+4. 🔎 Open a payout to inspect its status and recommendations
+5. 🧪 Explore recipient-reply presets and setup controls
+
+### 💻 OPTION 2 — LOCAL DEVELOPMENT
+
+Start PostgreSQL 16 in Docker, then run:
 
 ```bash
-make db                          # Postgres 16 in Docker
-make run                         # builds the UI, then serves everything on :8080
+make db
+make run
 ```
 
-Open the app, enter the token, click **Load demo data** (and **Load conflict pack**), then open any payout. Try the reply presets (including the two attack presets) and the time controls on the **Setup** page.
+The application builds the UI and serves it on port `8080`.
 
-## Using the real PayPal sandbox
+**Fake mode works without PayPal credentials.**
 
-1. In the PayPal developer dashboard create a sandbox **Business** account with funds and a sandbox app. Enable Payouts for the app if the dashboard offers that toggle.
-2. Set `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET`, then run `make check`. It prints a token or a precise failure.
-3. Create a **Live sandbox** batch with email addresses that have no PayPal account to get real `UNCLAIMED` items. **Simulated** batches use PayPal's documented canned test values for failure states.
-4. Register the webhook (see **Setup** in the app): `PUBLIC_BASE_URL/api/webhooks/paypal`, subscribe to the payout item and batch events, copy the Webhook ID into `PAYPAL_WEBHOOK_ID`.
+---
 
-PayPal's simulator events cannot be verified through the verify endpoint. Use real sandbox events, or set `WEBHOOK_BYPASS=true` for simulator events only (a banner shows while it is on).
+## 🅿️ PAYPAL SANDBOX INTEGRATION
 
-## One deployment, one URL
+To test provider integration:
 
-The Go binary embeds the built React app, so one process serves the UI, the API and the webhook.
+1. Create a sandbox Business account and sandbox app in the PayPal Developer Dashboard.
+2. Enable Payouts if available for the app.
+3. Configure `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET`.
+4. Run the connection check:
 
-| Route | Purpose | Auth |
-|---|---|---|
-| `cmd/server/main.go` | Process entry point: reads `PORT`, migrates, starts the reconciler and HTTP | n/a |
-| `GET /` and any non-`/api` path | React single-page app (falls back to `index.html`) | none |
-| `GET /assets/*` | Hashed static files (long cache) | none |
-| `/api/*` | JSON API | `Authorization: Bearer ADMIN_TOKEN` |
-| `POST /api/webhooks/paypal` | PayPal webhook | PayPal signature |
-| `GET /api/events` | Server-sent events (`?token=` also accepted) | token |
-| `GET /healthz` | Liveness, always 200 | none |
-| `GET /readyz` | Readiness, pings the database | none |
-| `cmd/check`, `cmd/bench` | Connection check, benchmark | n/a |
+   ```bash
+   make check
+   ```
 
-### Deploy to Render
+5. Configure the webhook endpoint:
 
-1. Push to GitHub (public, MIT license).
-2. Render: **New > Blueprint**, pick the repo. `render.yaml` creates one Docker web service and one Postgres database.
-3. Fill the secrets (`PAYPAL_*`, `LLM_API_KEY`). `ADMIN_TOKEN` is generated; read it in the dashboard.
-4. After the first deploy set `PUBLIC_BASE_URL` to the service URL and redeploy.
-5. Register the webhook (above), set `PAYPAL_WEBHOOK_ID`, redeploy, then run the smoke tests below.
+   ```text
+   PUBLIC_BASE_URL/api/webhooks/paypal
+   ```
 
-Use a paid instance so webhooks are not missed while the service sleeps, and keep the database alive until judging ends (check the plan's expiry).
+6. Register payout batch and item events, then configure `PAYPAL_WEBHOOK_ID`.
 
-**Smoke tests:** `/healthz` and `/readyz` return 200; the UI loads and a refresh on a deep link works; **Load demo data** shows items; a real sandbox webhook appears in the **Audit log**; approving a replacement twice creates one payout.
+**Simulator note:** simulator events cannot be verified through PayPal's verification endpoint. `WEBHOOK_BYPASS=true` is an explicit simulator-only testing option and displays a warning banner.
 
-## Configuration
+---
 
-| Variable | Default | Notes |
-|---|---|---|
-| `DATABASE_URL` | required | Postgres connection string. Add `?sslmode=disable` locally |
-| `ADMIN_TOKEN` | none | Required when `APP_ENV=production` |
-| `PORT` | `8080` | Render sets its own |
-| `APP_ENV` | `development` | `production` enforces the token |
-| `AUTO_MIGRATE` | `true` | Applies embedded SQL migrations on start |
-| `PAYPAL_BASE_URL` | sandbox URL | Anything else is refused at startup |
-| `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | empty | Without them only Fake mode runs |
-| `PAYPAL_WEBHOOK_ID` | empty | Needed to verify real webhooks |
-| `WEBHOOK_BYPASS` | `false` | Skips signature checks (sandbox simulator events only) |
-| `FAKE_ENABLED` | `true` | In-memory PayPal stand-in |
-| `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL` | `none` | `anthropic` supported; without one, templates and deterministic reading are used |
-| `RECONCILE_INTERVAL_SECONDS` | `300` | PayPal advises webhooks over polling; keep this modest |
-| `PUBLIC_BASE_URL`, `PLATFORM_NAME` | empty / `Acme Creators` | Shown in the UI and templates |
+## 🏗️ SYSTEM ARCHITECTURE
 
-## Tests and the benchmark
-
-```bash
-make test        # Go tests with -race (needs Postgres), then tsc and eslint
-make bench       # 39 scripted scenarios, naive retry script vs PayoutRescue
+```mermaid
+flowchart TD
+    A["👤 Operator"] --> B["⚛️ React + TypeScript UI"]
+    B --> C["🚀 Go HTTP API"]
+    C --> D["⚙️ Workflow Engine"]
+    E["🅿️ PayPal Sandbox"] --> F["🪝 Webhook Receiver"]
+    F --> D
+    D --> G["📐 Deterministic Rules"]
+    D --> H[("🗄️ PostgreSQL")]
+    D <--> I["🔌 PayPal Client"]
+    I <--> E
+    D --> J["🧠 AI Assistance"]
+    J --> K["🔐 Validation & Safety Guards"]
+    K --> D
+    D --> L["🧾 Hash-Chained Audit Log"]
+    M["🔄 Reconciler"] --> I
 ```
 
-The tests include a randomised "never pay twice" run (late claims, lost responses, duplicate webhooks, corrections, approvals) that checks the invariants after every step. The benchmark labels every scenario `FAKE`, `SIMULATED` or `LIVE_SANDBOX`. **It is a scripted comparison, not a real-world measurement.** The "manual steps" baseline (7 per problem item) is an assumption, and the 20 reply-reading cases were written alongside the code, so they are not an independent test.
+### 🧩 TECHNOLOGY STACK
 
-## What is verified, and what is not
-
-Verified in this repository: unit and integration tests against Postgres, the HTTP API, the embedded UI, the benchmark, lint and typecheck.
-
-**Not yet verified against the real PayPal sandbox** (this build had no credentials): that a real unregistered email becomes `UNCLAIMED`; the exact response shape of each PayPal test value (`SimItem` handles both an item payload and a named HTTP error); end-to-end webhook signature verification; that the sandbox app has Payouts enabled; and the error name used for invalid emails (`INVALID_EMAIL` vs `INVALID_EMAIL_ID`; both are handled). Run the day-1 spike in `docs/SPIKE.md` first. Anything unconfirmed is marked `TODO(verify)` in code.
-
-## Layout
-
-```
-cmd/server, cmd/check, cmd/bench     entry points
-internal/state      statuses, legal transitions, invariants (pure)
-internal/rules      error code -> proposed action (pure)
-internal/paypal     hand-written Payouts client, retries reuse request ids, SimItem
-internal/fakepaypal in-memory stand-in with fault injection
-internal/store      Postgres, embedded migrations, hash-chained audit log
-internal/engine     readback, propose, approve, safe cancel and replace, reconcile
-internal/ai         templates, validated extraction, injection guard, provider interface
-internal/httpapi    API, webhook, SSE, SPA serving
-internal/bench      benchmark harnesses and scenarios
-web/                React + TypeScript + Vite + Tailwind + AG Grid (Community)
-```
-
-See `ARCHITECTURE.md` for the state machine, invariants and failure modes, and `AGENTS.md` for the rules to follow when extending the project.
-
-## Troubleshooting
-
-| Symptom | Check |
+| Layer | Technology |
 |---|---|
-| Server exits: "refusing to start" | `PAYPAL_BASE_URL` must be the sandbox URL |
-| Live or Simulated modes are disabled | `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` are not set |
-| Webhooks return 401 | `PAYPAL_WEBHOOK_ID` missing or wrong; simulator events cannot be verified |
-| Blank page after `go run` | Build the UI first (`make web`); the binary embeds `web/dist` |
-| Render DB connection fails on TLS | Append `?sslmode=require` (or `disable` for a local database) to `DATABASE_URL` |
+| Backend | Go |
+| Frontend | React, TypeScript, Vite, Tailwind CSS |
+| Database | PostgreSQL |
+| Provider Integration | PayPal Payouts API |
+| AI Assistance | Provider abstraction, templates, validated extraction |
+| Runtime | Docker |
+| Live Updates | Server-Sent Events |
+| Testing | Go tests, race detector, TypeScript checks, ESLint |
 
-## License
+---
 
-MIT. Sandbox only; not affiliated with PayPal.
+## ⚙️ CONFIGURATION
+
+| Environment variable | Purpose |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection string |
+| `ADMIN_TOKEN` | API authentication; required in production |
+| `PORT` | HTTP server port; defaults to `8080` |
+| `APP_ENV` | Application environment |
+| `PAYPAL_BASE_URL` | PayPal sandbox API URL |
+| `PAYPAL_CLIENT_ID` | Sandbox client ID |
+| `PAYPAL_CLIENT_SECRET` | Sandbox client secret |
+| `PAYPAL_WEBHOOK_ID` | Webhook signature verification |
+| `WEBHOOK_BYPASS` | Explicit simulator-testing bypass |
+| `FAKE_ENABLED` | Enable the in-memory provider stand-in |
+| `LLM_PROVIDER` | AI provider selection |
+| `LLM_API_KEY` | AI provider API key |
+| `LLM_MODEL` | AI model name |
+| `PUBLIC_BASE_URL` | Public application URL |
+| `RECONCILE_INTERVAL_SECONDS` | Reconciliation interval |
+
+**Never commit credentials or `.env` files containing secrets.**
+
+---
+
+## 🧪 TESTING & BENCHMARKS
+
+Run the test suite:
+
+```bash
+make test
+```
+
+Run the benchmark:
+
+```bash
+make bench
+```
+
+The benchmark contains **39 scripted scenarios** comparing a naive retry script with PayoutRescue.
+
+The tests include a randomized **“never pay twice”** run covering late claims, lost responses, duplicate webhooks, corrections, and approvals.
+
+**Benchmark disclaimer:** results are scenario-based, not real-world performance measurements. The manual-step baseline is an assumption, and the reply-reading cases were authored alongside the code rather than independently evaluated.
+
+---
+
+## ✅ VERIFICATION STATUS
+
+### Verified in the repository
+
+- Go unit and integration tests against PostgreSQL
+- HTTP API
+- Embedded frontend
+- Benchmark harness
+- TypeScript checks and linting
+
+### Requires PayPal sandbox verification
+
+- Real unregistered-recipient `UNCLAIMED` behavior
+- Exact responses for all simulator test values
+- End-to-end webhook signature verification
+- Sandbox app Payouts enablement
+- Exact invalid-email error naming
+
+See `docs/SPIKE.md` for the initial verification plan. Unconfirmed behavior is marked `TODO(verify)` in the code.
+
+---
+
+## ☁️ DEPLOYMENT — RENDER
+
+1. Push the project to GitHub.
+2. Create a Render Blueprint from the repository.
+3. Review `render.yaml` to configure the Docker service and PostgreSQL database.
+4. Configure the required secrets and retrieve the generated `ADMIN_TOKEN`.
+5. Set `PUBLIC_BASE_URL` to the deployed service URL.
+6. Configure the PayPal webhook and `PAYPAL_WEBHOOK_ID`.
+7. Run the smoke tests.
+
+### 🔍 Deployment checklist
+
+- [ ] `/healthz` returns HTTP 200.
+- [ ] `/readyz` returns HTTP 200.
+- [ ] The UI loads and deep-link refreshes work.
+- [ ] Demo data loads successfully.
+- [ ] A real sandbox webhook appears in the audit log.
+- [ ] Repeated replacement approval does not create a second payout.
+
+---
+
+## 🧰 TROUBLESHOOTING
+
+| Problem | Solution |
+|---|---|
+| Server refuses to start | Ensure `PAYPAL_BASE_URL` points to the sandbox. |
+| Live or Simulated modes are disabled | Configure sandbox client credentials. |
+| Webhook returns `401` | Check `PAYPAL_WEBHOOK_ID` and webhook verification settings. |
+| UI is blank after running Go | Build the frontend with `make web`. |
+| Database connection fails | Check `DATABASE_URL` and the appropriate TLS setting. |
+
+---
+
+## 📂 PROJECT STRUCTURE
+
+```text
+cmd/
+  server/          Application entry point
+  check/            PayPal connection checker
+  bench/            Benchmark runner
+
+internal/
+  state/            Statuses, transitions, invariants
+  rules/             Error mapping and recommendations
+  paypal/            PayPal Payouts client
+  fakepaypal/        In-memory provider simulator
+  store/             PostgreSQL and audit log
+  engine/            Workflow and reconciliation engine
+  ai/                Templates and validated extraction
+  httpapi/           API, webhooks, SSE, SPA serving
+  bench/             Benchmark scenarios
+
+web/                 React + TypeScript frontend
+```
+
+### 📚 PROJECT DOCUMENTATION
+
+- `ARCHITECTURE.md` — state machine, invariants, and failure modes
+- `AGENTS.md` — safe development guidelines
+- `docs/SPIKE.md` — PayPal sandbox verification plan
+
+---
+
+## 📜 LICENSE
+
+**MIT License**
+
+Sandbox-only project. Not affiliated with or endorsed by PayPal.
+
+---
+
+### 💙 BUILT WITH A SAFETY-FIRST MINDSET
+
+**PayoutRescue — making payout recovery clearer, safer, and more accountable.**
